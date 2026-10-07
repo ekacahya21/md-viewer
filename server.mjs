@@ -11,13 +11,20 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 80;
 
+// Read application version from package.json
+let APP_VERSION = '1.1.0';
+try {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
+  if (pkg.version) APP_VERSION = pkg.version;
+} catch {}
+
 // Automatically load .env if present
 try {
   const envPath = path.join(__dirname, '.env');
   if (fs.existsSync(envPath) && typeof process.loadEnvFile === 'function') {
     process.loadEnvFile(envPath);
   }
-} catch (_) {}
+} catch {}
 
 // Setup Database
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'shared_docs.db');
@@ -240,7 +247,7 @@ app.get('/api/health', (req, res) => {
     const row = db.prepare('SELECT 1 as alive').get();
     res.json({
       status: 'ok',
-      version: '1.0.0',
+      version: APP_VERSION,
       uptime: Math.floor(process.uptime()),
       timestamp: Date.now(),
       database: row && row.alive === 1 ? 'connected' : 'error',

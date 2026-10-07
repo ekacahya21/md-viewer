@@ -55,7 +55,7 @@ test('Healthcheck - GET /api/health returns 200 with status ok and version', asy
 
   const json = await res.json();
   assert.equal(json.status, 'ok');
-  assert.equal(json.version, '1.0.0');
+  assert.equal(json.version, '1.1.0');
   assert.equal(json.database, 'connected');
   assert.equal(typeof json.uptime, 'number');
 });
