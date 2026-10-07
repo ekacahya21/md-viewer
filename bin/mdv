@@ -1,0 +1,628 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# mdv - Minimalist Markdown Viewer CLI
+# Push local markdown files or stdin directly to md-viewer.e21.dev as short URLs
+# ==============================================================================
+
+set -eo pipefail
+
+VERSION="1.0.0"
+DEFAULT_SERVER="https://md-viewer.e21.dev"
+SERVER="${MDV_SERVER:-$DEFAULT_SERVER}"
+CONFIG_DIR="${HOME}/.config/mdv"
+TOKENS_FILE="${CONFIG_DIR}/tokens.json"
+
+# Color helpers
+if [ -t 1 ]; then
+  BOLD=$'\033[1m'
+  DIM=$'\033[2m'
+  GREEN=$'\033[32m'
+  AMBER=$'\033[33m'
+  CYAN=$'\033[36m'
+  RED=$'\033[31m'
+  RESET=$'\033[0m'
+else
+  BOLD=""
+  DIM=""
+  GREEN=""
+  AMBER=""
+  CYAN=""
+  RED=""
+  RESET=""
+fi
+
+usage() {
+  cat << EOF
+${BOLD}mdv${RESET} - Instant Markdown publisher for ${CYAN}${SERVER}${RESET} (v${VERSION})
+
+${BOLD}USAGE:${RESET}
+  mdv [OPTIONS] [FILE.md]
+  cat FILE.md | mdv [OPTIONS]
+  mdv mcp [config]
+
+${BOLD}OPTIONS:${RESET}
+  -t, --title <TEXT>       Document title (default: auto-detected from first # Heading or filename)
+  -e, --expire <DURATION>  Expiration duration: never, 7d, 30d, 1y (default: never)
+  -u, --update <ID>        Update an existing shared document (uses stored edit token)
+  -r, --raw                Output only the raw Short URL (clean for shell scripts & piping)
+  -o, --open               Open the generated URL immediately in your default browser
+  -l, --list               List previously shared documents and their edit tokens
+  -c, --no-copy            Do not copy the URL to system clipboard
+  --mcp                    Start Model Context Protocol (MCP) stdio server for AI agents
+  -h, --help               Show this help message
+  -v, --version            Display version information
+
+${BOLD}MCP SUBCOMMANDS (for AI Agents):${RESET}
+  mdv mcp                  Start stdio MCP server for Claude Desktop, Cursor, Cline
+  mdv mcp config           Show MCP configuration instructions and JSON snippets
+
+${BOLD}EXAMPLES:${RESET}
+  mdv README.md                    # Share local file with auto-detected title
+  mdv notes.md -t "Project Spec"   # Share with explicit title
+  mdv notes.md -e 7d               # Share with 7-day expiration
+  mdv -u abc1234 updated.md        # Update existing shared URL
+  cat draft.md | mdv               # Pipe directly from stdin
+  git diff | mdv -t "Git Diff"     # Share git diff output
+  mdv README.md -r                 # Print only https://md-viewer.e21.dev/s/xyz
+  mdv --mcp                        # Launch MCP JSON-RPC server on stdio
+  mdv mcp config                   # View MCP configuration for Claude, Cursor, Cline
+
+EOF
+  exit 0
+}
+
+# Ensure config directory exists
+ensure_config() {
+  if [ ! -d "${CONFIG_DIR}" ]; then
+    mkdir -p "${CONFIG_DIR}"
+  fi
+  if [ ! -f "${TOKENS_FILE}" ]; then
+    echo "[]" > "${TOKENS_FILE}"
+  fi
+}
+
+# Cross-platform JSON encoding helper (uses python3, node, or jq, falling back gracefully)
+json_encode() {
+  local str="$1"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "import json, sys; print(json.dumps(sys.argv[1]))" "$str"
+  elif command -v node >/dev/null 2>&1; then
+    node -e "process.stdout.write(JSON.stringify(process.argv[1]))" "$str"
+  elif command -v jq >/dev/null 2>&1; then
+    jq -Rs . <<< "$str" | tr -d '\n'
+  else
+    # Simple fallback escaping
+    echo -n "$str" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' | awk '{printf "%s\\n", $0}' | sed 's/\\n$//' | sed 's/^/"/' | sed 's/$/"/'
+  fi
+}
+
+# Save token to tokens.json
+save_token() {
+  local doc_id="$1"
+  local short_url="$2"
+  local doc_title="$3"
+  local edit_token="$4"
+  local created_at="$5"
+
+  ensure_config
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "
+import json, sys, os
+file_path = sys.argv[1]
+data = []
+if os.path.exists(file_path):
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+    except:
+        data = []
+
+# Replace if exists or prepend
+data = [d for d in data if d.get('id') != sys.argv[2]]
+data.insert(0, {
+    'id': sys.argv[2],
+    'url': sys.argv[3],
+    'title': sys.argv[4],
+    'editToken': sys.argv[5],
+    'createdAt': int(sys.argv[6])
+})
+data = data[:50] # Keep recent 50
+with open(file_path, 'w') as f:
+    json.dump(data, f, indent=2)
+" "${TOKENS_FILE}" "$doc_id" "$short_url" "$doc_title" "$edit_token" "$created_at"
+  elif command -v node >/dev/null 2>&1; then
+    node -e "
+const fs = require('fs');
+const file = process.argv[1];
+let data = [];
+try { data = JSON.parse(fs.readFileSync(file, 'utf8')); } catch(e) {}
+data = data.filter(d => d.id !== process.argv[2]);
+data.unshift({
+  id: process.argv[2],
+  url: process.argv[3],
+  title: process.argv[4],
+  editToken: process.argv[5],
+  createdAt: parseInt(process.argv[6])
+});
+fs.writeFileSync(file, JSON.stringify(data.slice(0, 50), null, 2));
+" "${TOKENS_FILE}" "$doc_id" "$short_url" "$doc_title" "$edit_token" "$created_at"
+  fi
+}
+
+# Lookup token from tokens.json
+get_token() {
+  local doc_id="$1"
+  ensure_config
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "
+import json, sys
+try:
+    with open(sys.argv[1], 'r') as f:
+        data = json.load(f)
+    for d in data:
+        if d.get('id') == sys.argv[2]:
+            print(d.get('editToken', ''))
+            sys.exit(0)
+except:
+    pass
+sys.exit(1)
+" "${TOKENS_FILE}" "$doc_id" 2>/dev/null || true
+  elif command -v node >/dev/null 2>&1; then
+    node -e "
+const fs = require('fs');
+try {
+  const data = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+  const found = data.find(d => d.id === process.argv[2]);
+  if (found && found.editToken) {
+    process.stdout.write(found.editToken);
+    process.exit(0);
+  }
+} catch(e) {}
+process.exit(1);
+" "${TOKENS_FILE}" "$doc_id" 2>/dev/null || true
+  fi
+}
+
+# List history
+list_tokens() {
+  ensure_config
+  if [ ! -s "${TOKENS_FILE}" ]; then
+    echo "No documents shared yet."
+    exit 0
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "
+import json, sys, datetime
+try:
+    with open(sys.argv[1], 'r') as f:
+        data = json.load(f)
+    if not data:
+        print('No documents shared yet.')
+        sys.exit(0)
+    print('${BOLD}Recent Shared Documents (${SERVER}):${RESET}\n')
+    for d in data:
+        dt = datetime.datetime.fromtimestamp(d.get('createdAt', 0)/1000).strftime('%Y-%m-%d %H:%M') if d.get('createdAt') else 'N/A'
+        print(f\"  ${AMBER}•${RESET} ${BOLD}{d.get('title', 'Untitled')}${RESET}\")
+        print(f\"    URL:   ${CYAN}{d.get('url')}${RESET}\")
+        print(f\"    ID:    {d.get('id')}  ${DIM}({dt})${RESET}\")
+        print()
+except Exception as e:
+    print('Failed to read history:', e)
+" "${TOKENS_FILE}"
+  elif command -v node >/dev/null 2>&1; then
+    node -e "
+const fs = require('fs');
+try {
+  const data = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+  if (!data.length) { console.log('No documents shared yet.'); process.exit(0); }
+  console.log('${BOLD}Recent Shared Documents (${SERVER}):${RESET}\n');
+  data.forEach(d => {
+    const dt = d.createdAt ? new Date(d.createdAt).toISOString().replace('T', ' ').slice(0, 16) : 'N/A';
+    console.log('  ${AMBER}•${RESET} ${BOLD}' + (d.title || 'Untitled') + '${RESET}');
+    console.log('    URL:   ${CYAN}' + d.url + '${RESET}');
+    console.log('    ID:    ' + d.id + '  ${DIM}(' + dt + ')${RESET}\n');
+  });
+} catch(e) { console.log('Failed to read history.'); }
+" "${TOKENS_FILE}"
+  else
+    cat "${TOKENS_FILE}"
+  fi
+  exit 0
+}
+
+# Copy to clipboard helper
+copy_to_clipboard() {
+  local text="$1"
+  if command -v pbcopy >/dev/null 2>&1; then
+    printf "%s" "$text" | pbcopy
+    return 0
+  elif command -v wl-copy >/dev/null 2>&1; then
+    printf "%s" "$text" | wl-copy
+    return 0
+  elif command -v xclip >/dev/null 2>&1; then
+    printf "%s" "$text" | xclip -selection clipboard
+    return 0
+  elif command -v xsel >/dev/null 2>&1; then
+    printf "%s" "$text" | xsel --clipboard --input
+    return 0
+  fi
+  return 1
+}
+
+# Open URL helper
+open_browser() {
+  local url="$1"
+  if command -v open >/dev/null 2>&1; then
+    open "$url"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$url" >/dev/null 2>&1 &
+  fi
+}
+
+# Model Context Protocol (MCP) helpers
+show_mcp_config() {
+  local mdv_bin
+  mdv_bin=$(command -v mdv 2>/dev/null || echo "mdv")
+
+  cat << EOF
+${BOLD}${CYAN}MD Viewer - Model Context Protocol (MCP) Setup Guide${RESET}
+
+Connect md-viewer with AI coding assistants (Claude Desktop, Cursor, Cline, Antigravity)
+to give agents the power to publish, update, and inspect live Markdown documents.
+
+${BOLD}1. Claude Desktop${RESET}
+Edit configuration file:
+  • macOS:   ${DIM}~/Library/Application Support/Claude/claude_desktop_config.json${RESET}
+  • Linux:   ${DIM}~/.config/Claude/claude_desktop_config.json${RESET}
+  • Windows: ${DIM}%APPDATA%\\Claude\\claude_desktop_config.json${RESET}
+
+Add under ${BOLD}"mcpServers"${RESET}:
+${GREEN}{
+  "mcpServers": {
+    "md-viewer": {
+      "command": "${mdv_bin}",
+      "args": ["--mcp"]
+    }
+  }
+}${RESET}
+
+${BOLD}2. Cursor IDE${RESET}
+Create or edit ${DIM}.cursor/mcp.json${RESET} in your workspace root:
+${GREEN}{
+  "mcpServers": {
+    "md-viewer": {
+      "command": "${mdv_bin}",
+      "args": ["--mcp"]
+    }
+  }
+}${RESET}
+
+${BOLD}3. Cline / Roo-Code (VS Code Extension)${RESET}
+Add to ${DIM}cline_mcp_settings.json${RESET}:
+${GREEN}{
+  "mcpServers": {
+    "md-viewer": {
+      "command": "${mdv_bin}",
+      "args": ["--mcp"]
+    }
+  }
+}${RESET}
+
+${BOLD}4. Google Antigravity / Gemini CLI${RESET}
+Add to ${DIM}~/.gemini/antigravity-cli/mcp.json${RESET}:
+${GREEN}{
+  "mcpServers": {
+    "md-viewer": {
+      "command": "${mdv_bin}",
+      "args": ["--mcp"]
+    }
+  }
+}${RESET}
+
+${BOLD}Available MCP Tools:${RESET}
+  • ${BOLD}publish_document${RESET}  Publish Markdown content and get short URL + auto-saved token
+  • ${BOLD}update_document${RESET}   Update existing shared document (auto-resolves edit token)
+  • ${BOLD}get_document${RESET}      Retrieve document title, content, views count, and metadata
+
+${DIM}To test the MCP server manually in your terminal, run:${RESET}
+  ${CYAN}mdv --mcp${RESET}
+EOF
+}
+
+start_mcp_server() {
+  if ! command -v node >/dev/null 2>&1; then
+    echo -e "${RED}Error: Node.js (v18+) is required to run the mdv MCP server.${RESET}" >&2
+    echo "Please install Node.js from https://nodejs.org/" >&2
+    exit 1
+  fi
+
+  # 1. Check adjacent directory (cloned repo or co-located install)
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -f "${script_dir}/mcp-server.mjs" ]; then
+    exec node "${script_dir}/mcp-server.mjs"
+  fi
+
+  # 2. Check in user config dir (~/.config/mdv/mcp-server.mjs)
+  ensure_config
+  local config_server="${CONFIG_DIR}/mcp-server.mjs"
+  if [ -f "${config_server}" ]; then
+    exec node "${config_server}"
+  fi
+
+  # 3. Attempt download from server or GitHub fallback
+  local download_url="${SERVER}/bin/mcp-server.mjs"
+  local fallback_url="https://raw.githubusercontent.com/ekacahya21/md-viewer/main/bin/mcp-server.mjs"
+  if curl -fsSL "${download_url}" -o "${config_server}" 2>/dev/null || curl -fsSL "${fallback_url}" -o "${config_server}" 2>/dev/null; then
+    chmod +x "${config_server}"
+    exec node "${config_server}"
+  fi
+
+  echo -e "${RED}Error: Could not locate or download mcp-server.mjs.${RESET}" >&2
+  exit 1
+}
+
+# Handle 'mcp' subcommand early
+if [ "$1" = "mcp" ]; then
+  shift
+  case "$1" in
+    config|install|setup)
+      show_mcp_config
+      exit 0
+      ;;
+    ""|--stdio)
+      start_mcp_server
+      ;;
+    *)
+      echo -e "${RED}Unknown mcp command: '$1'. Run 'mdv mcp config' for setup guide.${RESET}" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+# Parse command line flags
+CUSTOM_TITLE=""
+EXPIRE="never"
+UPDATE_ID=""
+RAW_OUTPUT=0
+OPEN_IN_BROWSER=0
+NO_COPY=0
+INPUT_FILE=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mcp)
+      start_mcp_server
+      ;;
+    -h|--help)
+      usage
+      ;;
+    -v|--version)
+      echo "mdv version ${VERSION}"
+      exit 0
+      ;;
+    -l|--list)
+      list_tokens
+      ;;
+    -r|--raw)
+      RAW_OUTPUT=1
+      shift
+      ;;
+    -o|--open)
+      OPEN_IN_BROWSER=1
+      shift
+      ;;
+    -c|--no-copy)
+      NO_COPY=1
+      shift
+      ;;
+    -t|--title)
+      if [ -z "$2" ] || [[ "$2" == -* ]]; then
+        echo -e "${RED}Error: --title requires an argument.${RESET}" >&2
+        exit 1
+      fi
+      CUSTOM_TITLE="$2"
+      shift 2
+      ;;
+    -e|--expire)
+      if [ -z "$2" ] || [[ "$2" == -* ]]; then
+        echo -e "${RED}Error: --expire requires an argument (never, 7d, 30d, 1y).${RESET}" >&2
+        exit 1
+      fi
+      EXPIRE="$2"
+      shift 2
+      ;;
+    -u|--update)
+      if [ -z "$2" ] || [[ "$2" == -* ]]; then
+        echo -e "${RED}Error: --update requires a document ID.${RESET}" >&2
+        exit 1
+      fi
+      UPDATE_ID="$2"
+      shift 2
+      ;;
+    *)
+      if [ -z "$INPUT_FILE" ]; then
+        INPUT_FILE="$1"
+        shift
+      else
+        echo -e "${RED}Error: Unexpected argument '$1'.${RESET}" >&2
+        usage
+      fi
+      ;;
+  esac
+done
+
+# Read markdown content
+CONTENT=""
+AUTO_TITLE=""
+
+if [ -n "$INPUT_FILE" ]; then
+  if [ ! -f "$INPUT_FILE" ]; then
+    echo -e "${RED}Error: File '$INPUT_FILE' not found.${RESET}" >&2
+    exit 1
+  fi
+  CONTENT=$(cat "$INPUT_FILE")
+  FILENAME=$(basename "$INPUT_FILE")
+  AUTO_TITLE="${FILENAME%.*}"
+else
+  # Read from stdin if available
+  if [ -t 0 ]; then
+    echo -e "${RED}Error: No input file provided and nothing piped to stdin.${RESET}" >&2
+    echo "Usage: mdv <file.md> or cat <file.md> | mdv" >&2
+    exit 1
+  fi
+  CONTENT=$(cat)
+fi
+
+if [ -z "$(echo -n "$CONTENT" | tr -d '[:space:]')" ]; then
+  echo -e "${RED}Error: Markdown content is empty.${RESET}" >&2
+  exit 1
+fi
+
+# Detect title from first markdown heading (# Title)
+EXTRACTED_HEADING=$(echo "$CONTENT" | grep -m 1 -E '^[[:space:]]*#[[:space:]]+' | sed -E 's/^[[:space:]]*#[[:space:]]+//' | tr -d '\r' || true)
+
+TITLE="Untitled Document"
+if [ -n "$CUSTOM_TITLE" ]; then
+  TITLE="$CUSTOM_TITLE"
+elif [ -n "$EXTRACTED_HEADING" ]; then
+  TITLE="$EXTRACTED_HEADING"
+elif [ -n "$AUTO_TITLE" ]; then
+  TITLE="$AUTO_TITLE"
+fi
+
+# Calculate expiration timestamp
+EXPIRES_AT="null"
+NOW_MS=$(date +%s%3N 2>/dev/null || echo "$(( $(date +%s) * 1000 ))")
+
+case "$EXPIRE" in
+  never)
+    EXPIRES_AT="null"
+    ;;
+  7d|7)
+    EXPIRES_AT=$(( NOW_MS + 7 * 86400 * 1000 ))
+    ;;
+  30d|30)
+    EXPIRES_AT=$(( NOW_MS + 30 * 86400 * 1000 ))
+    ;;
+  1y|365d)
+    EXPIRES_AT=$(( NOW_MS + 365 * 86400 * 1000 ))
+    ;;
+  *)
+    echo -e "${RED}Error: Invalid expiration '$EXPIRE'. Choose from: never, 7d, 30d, 1y.${RESET}" >&2
+    exit 1
+    ;;
+esac
+
+# Prepare JSON payload safely
+JSON_TITLE=$(json_encode "$TITLE")
+JSON_CONTENT=$(json_encode "$CONTENT")
+
+PAYLOAD=$(cat << EOF
+{
+  "title": ${JSON_TITLE},
+  "content": ${JSON_CONTENT},
+  "expiresAt": ${EXPIRES_AT}
+}
+EOF
+)
+
+# Execute API Request
+if [ -n "$UPDATE_ID" ]; then
+  # UPDATE MODE
+  TOKEN=$(get_token "$UPDATE_ID")
+  if [ -z "$TOKEN" ]; then
+    echo -e "${AMBER}Notice: No stored edit token found for '$UPDATE_ID' in ${TOKENS_FILE}.${RESET}" >&2
+    read -r -p "Enter edit token manually: " TOKEN
+  fi
+
+  if [ -z "$TOKEN" ]; then
+    echo -e "${RED}Error: Edit token is required to update document '$UPDATE_ID'.${RESET}" >&2
+    exit 1
+  fi
+
+  API_URL="${SERVER}/api/share/${UPDATE_ID}"
+  RESPONSE=$(curl -sS -X PUT "${API_URL}" \
+    -H "Content-Type: application/json" \
+    -H "X-Edit-Token: ${TOKEN}" \
+    -d "${PAYLOAD}" 2>&1)
+
+  # Check if update succeeded
+  SHORT_URL="${SERVER}/s/${UPDATE_ID}"
+  if echo "$RESPONSE" | grep -q '"success":true'; then
+    save_token "$UPDATE_ID" "$SHORT_URL" "$TITLE" "$TOKEN" "$NOW_MS"
+    COPIED=0
+    if [ "$NO_COPY" -eq 0 ]; then
+      if copy_to_clipboard "$SHORT_URL"; then
+        COPIED=1
+      fi
+    fi
+
+    if [ "$RAW_OUTPUT" -eq 1 ]; then
+      echo "$SHORT_URL"
+    else
+      echo -e "${GREEN}${BOLD}✓ Document successfully updated!${RESET}"
+      echo -e "  ${BOLD}Title:${RESET}    ${TITLE}"
+      echo -e "  ${BOLD}Short URL:${RESET}${CYAN} ${SHORT_URL}${RESET}"
+      [ "$COPIED" -eq 1 ] && echo -e "  ${DIM}📋 Copied to clipboard!${RESET}"
+    fi
+
+    if [ "$OPEN_IN_BROWSER" -eq 1 ]; then
+      open_browser "$SHORT_URL"
+    fi
+    exit 0
+  else
+    ERR_MSG=$(echo "$RESPONSE" | grep -o '"error":"[^"]*"' | cut -d'"' -f4 || echo "$RESPONSE")
+    echo -e "${RED}Error updating document: ${ERR_MSG}${RESET}" >&2
+    exit 1
+  fi
+
+else
+  # CREATE MODE
+  API_URL="${SERVER}/api/share"
+  RESPONSE=$(curl -sS -X POST "${API_URL}" \
+    -H "Content-Type: application/json" \
+    -d "${PAYLOAD}" 2>&1)
+
+  # Extract fields from response
+  SHORT_URL=$(echo "$RESPONSE" | grep -o '"shortUrl":"[^"]*"' | cut -d'"' -f4 || true)
+  DOC_ID=$(echo "$RESPONSE" | grep -o '"id":"[^"]*"' | cut -d'"' -f4 || true)
+  EDIT_TOKEN=$(echo "$RESPONSE" | grep -o '"editToken":"[^"]*"' | cut -d'"' -f4 || true)
+
+  if [ -z "$SHORT_URL" ] || [ -z "$DOC_ID" ]; then
+    ERR_MSG=$(echo "$RESPONSE" | grep -o '"error":"[^"]*"' | cut -d'"' -f4 || echo "$RESPONSE")
+    echo -e "${RED}Error creating short URL: ${ERR_MSG}${RESET}" >&2
+    exit 1
+  fi
+
+  # Save to local history
+  save_token "$DOC_ID" "$SHORT_URL" "$TITLE" "$EDIT_TOKEN" "$NOW_MS"
+
+  # Copy to clipboard
+  COPIED=0
+  if [ "$NO_COPY" -eq 0 ]; then
+    if copy_to_clipboard "$SHORT_URL"; then
+      COPIED=1
+    fi
+  fi
+
+  # Output results
+  if [ "$RAW_OUTPUT" -eq 1 ]; then
+    echo "$SHORT_URL"
+  else
+    echo -e "${GREEN}${BOLD}✓ Markdown published successfully!${RESET}"
+    echo -e "  ${BOLD}Title:${RESET}     ${TITLE}"
+    echo -e "  ${BOLD}Short URL:${RESET} ${CYAN}${BOLD}${SHORT_URL}${RESET}"
+    echo -e "  ${BOLD}ID:${RESET}        ${DOC_ID}"
+    if [ "$EXPIRE" != "never" ]; then
+      echo -e "  ${BOLD}Expires:${RESET}   ${EXPIRE}"
+    fi
+    [ "$COPIED" -eq 1 ] && echo -e "  ${DIM}📋 Copied to clipboard!${RESET}"
+  fi
+
+  if [ "$OPEN_IN_BROWSER" -eq 1 ]; then
+    open_browser "$SHORT_URL"
+  fi
+fi
