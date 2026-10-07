@@ -127,11 +127,13 @@ echo -e "  ${CLR_BOLD}Target Port:${CLR_RESET}  ${HOST_PORT} (Public: ${PUBLIC_U
 echo -e "  ${CLR_BOLD}Dry Run:${CLR_RESET}      ${DRY_RUN}"
 echo -e "  ${CLR_BOLD}Skip Tests:${CLR_RESET}   ${SKIP_TESTS}"
 
-# Cleanup candidate container helper
 cleanup_candidate() {
   if docker ps -a --format '{{.Names}}' | grep -Eq "^${CANDIDATE_CONTAINER}\$"; then
     log_info "Cleaning up temporary candidate container ${CANDIDATE_CONTAINER}..."
     docker rm -f "${CANDIDATE_CONTAINER}" >/dev/null 2>&1 || true
+  fi
+  if [ -n "${CANDIDATE_DATA_DIR:-}" ] && [ -d "${CANDIDATE_DATA_DIR}" ]; then
+    rm -rf "${CANDIDATE_DATA_DIR}" || true
   fi
 }
 
@@ -320,12 +322,18 @@ log_step "5/7" "Pre-Rollout Staging & Candidate Health Probing (Zero-Touch)"
 
 cleanup_candidate
 
+# Create isolated staging clone of data directory for migration probing
+CANDIDATE_DATA_DIR="$(mktemp -d -t mdv-candidate-data-XXXXXXXX)"
+if [ -d "${DATA_DIR}" ]; then
+  cp -r "${DATA_DIR}/." "${CANDIDATE_DATA_DIR}/" 2>/dev/null || true
+fi
+
 log_info "Starting isolated candidate container on test port ${CANDIDATE_PORT}..."
 docker run -d \
   --name "${CANDIDATE_CONTAINER}" \
   -p "127.0.0.1:${CANDIDATE_PORT}:80" \
   --env-file "${ENV_FILE}" \
-  -v "${DATA_DIR}:/data:ro" \
+  -v "${CANDIDATE_DATA_DIR}:/data:rw" \
   "${APP_NAME}:candidate" >/dev/null
 
 log_info "Probing candidate container liveness and readiness..."
