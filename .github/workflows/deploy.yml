@@ -139,10 +139,9 @@ jobs:
           username: ${{ steps.prep.outputs.ssh_user }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ steps.prep.outputs.ssh_port }}
-          script_stop: true
           command_timeout: 20m
           script: |
-            set -e
+            set -euo pipefail
             cd /home/ubuntu/md-viewer
             
             ACTION="${{ steps.prep.outputs.action }}"
@@ -155,17 +154,19 @@ jobs:
               ./scripts/rollback.sh
             elif [ "$ACTION" = "deploy-dry-run" ]; then
               echo "Pulling latest git ref and executing candidate dry-run..."
-              git fetch origin --tags
+              git fetch origin --tags --prune
               if git show-ref --verify --quiet "refs/tags/$TARGET_REF"; then
+                echo "Checking out Git Tag: $TARGET_REF"
                 git checkout "tags/$TARGET_REF"
               else
+                echo "Checking out Branch: $TARGET_REF"
                 git checkout "$TARGET_REF" || git checkout -b "$TARGET_REF" "origin/$TARGET_REF"
                 git reset --hard "origin/$TARGET_REF"
               fi
               ./scripts/deploy.sh --dry-run
             else
               echo "Pulling latest git ref and running fail-safe deployment pipeline..."
-              git fetch origin --tags
+              git fetch origin --tags --prune
               if git show-ref --verify --quiet "refs/tags/$TARGET_REF"; then
                 echo "Checking out Git Tag: $TARGET_REF"
                 git checkout "tags/$TARGET_REF"
