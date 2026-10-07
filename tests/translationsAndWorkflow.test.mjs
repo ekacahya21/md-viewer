@@ -21,6 +21,20 @@ test('i18n - English and Indonesian have complete translation keys for new featu
     assert.ok(translations.en.confirmReplaceModal[key], `en confirmReplaceModal.${key} should exist`);
     assert.ok(translations.id.confirmReplaceModal[key], `id confirmReplaceModal.${key} should exist`);
   }
+
+  // Check shareModal protection keys
+  const shareProtectionKeys = ['passwordLabel', 'passwordPlaceholder', 'passwordHint', 'burnAfterReadLabel', 'burnAfterReadDesc', 'protectedBadge', 'burnBadge'];
+  for (const key of shareProtectionKeys) {
+    assert.ok(translations.en.shareModal[key], `en shareModal.${key} should exist`);
+    assert.ok(translations.id.shareModal[key], `id shareModal.${key} should exist`);
+  }
+
+  // Check protectedDoc keys
+  const protectedDocKeys = ['lockedTitle', 'lockedSubtitle', 'passwordPlaceholder', 'unlockBtn', 'unlocking', 'wrongPassword', 'rateLimited', 'burnedTitle', 'burnedSubtitle', 'burnedAction', 'burnWarningBanner'];
+  for (const key of protectedDocKeys) {
+    assert.ok(translations.en.protectedDoc[key], `en protectedDoc.${key} should exist`);
+    assert.ok(translations.id.protectedDoc[key], `id protectedDoc.${key} should exist`);
+  }
 });
 
 test('useDocumentSummary - content signature generation helper', async () => {

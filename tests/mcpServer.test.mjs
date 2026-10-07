@@ -223,3 +223,37 @@ test('MCP Tool - rejects empty content or invalid ID with isError: true', async 
   });
   assert.equal(resNotFound.result.isError, true);
 });
+
+test('MCP Tool - publish_document with password and unlock via get_document', async () => {
+  const publishRes = await sendMcpRequest('tools/call', {
+    name: 'publish_document',
+    arguments: {
+      title: 'MCP Protected Spec',
+      content: '# Confidential Architecture\nThis is secret.',
+      password: 'mcp-secret-pass',
+    },
+  });
+
+  assert.equal(publishRes.result.isError, false);
+  const text = publishRes.result.content[0].text;
+  assert.ok(text.includes('Password protected'));
+  const idMatch = text.match(/• ID:\s*([a-zA-Z0-9]+)/);
+  assert.ok(idMatch);
+  const docId = idMatch[1];
+
+  // 1. get_document without password -> should report error asking for password
+  const lockedRes = await sendMcpRequest('tools/call', {
+    name: 'get_document',
+    arguments: { id: docId },
+  });
+  assert.equal(lockedRes.result.isError, true);
+  assert.ok(lockedRes.result.content[0].text.includes('password'));
+
+  // 2. get_document with correct password -> should reveal content
+  const unlockedRes = await sendMcpRequest('tools/call', {
+    name: 'get_document',
+    arguments: { id: docId, password: 'mcp-secret-pass' },
+  });
+  assert.equal(unlockedRes.result.isError, false);
+  assert.ok(unlockedRes.result.content[0].text.includes('Confidential Architecture'));
+});

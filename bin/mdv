@@ -44,6 +44,8 @@ ${BOLD}OPTIONS:${RESET}
   -t, --title <TEXT>       Document title (default: auto-detected from first # Heading or filename)
   -e, --expire <DURATION>  Expiration duration: never, 7d, 30d, 1y (default: never)
   -u, --update <ID>        Update an existing shared document (uses stored edit token)
+  -p, --password <PASS>    Protect document with password/PIN (readers must enter it)
+  -b, --burn               Burn after reading (auto-destroys content after 1st view)
   -r, --raw                Output only the raw Short URL (clean for shell scripts & piping)
   -o, --open               Open the generated URL immediately in your default browser
   -l, --list               List previously shared documents and their edit tokens
@@ -386,6 +388,8 @@ fi
 CUSTOM_TITLE=""
 EXPIRE="never"
 UPDATE_ID=""
+PASSWORD=""
+BURN_AFTER_READ=0
 RAW_OUTPUT=0
 OPEN_IN_BROWSER=0
 NO_COPY=0
@@ -416,6 +420,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     -c|--no-copy)
       NO_COPY=1
+      shift
+      ;;
+    -p|--password)
+      if [ -z "$2" ] || [[ "$2" == -* ]]; then
+        echo -e "${RED}Error: --password requires an argument.${RESET}" >&2
+        exit 1
+      fi
+      PASSWORD="$2"
+      shift 2
+      ;;
+    -b|--burn)
+      BURN_AFTER_READ=1
       shift
       ;;
     -t|--title)
@@ -519,12 +535,22 @@ esac
 # Prepare JSON payload safely
 JSON_TITLE=$(json_encode "$TITLE")
 JSON_CONTENT=$(json_encode "$CONTENT")
+JSON_PASS="null"
+if [ -n "$PASSWORD" ]; then
+  JSON_PASS=$(json_encode "$PASSWORD")
+fi
+BURN_VAL="false"
+if [ "$BURN_AFTER_READ" -eq 1 ]; then
+  BURN_VAL="true"
+fi
 
 PAYLOAD=$(cat << EOF
 {
   "title": ${JSON_TITLE},
   "content": ${JSON_CONTENT},
-  "expiresAt": ${EXPIRES_AT}
+  "expiresAt": ${EXPIRES_AT},
+  "password": ${JSON_PASS},
+  "burnAfterRead": ${BURN_VAL}
 }
 EOF
 )
@@ -618,6 +644,12 @@ else
     echo -e "  ${BOLD}ID:${RESET}        ${DOC_ID}"
     if [ "$EXPIRE" != "never" ]; then
       echo -e "  ${BOLD}Expires:${RESET}   ${EXPIRE}"
+    fi
+    if [ -n "$PASSWORD" ]; then
+      echo -e "  ${BOLD}Security:${RESET}  🔒 Password protected"
+    fi
+    if [ "$BURN_AFTER_READ" -eq 1 ]; then
+      echo -e "  ${BOLD}Security:${RESET}  🔥 Burn after reading (1x view)"
     fi
     [ "$COPIED" -eq 1 ] && echo -e "  ${DIM}📋 Copied to clipboard!${RESET}"
   fi

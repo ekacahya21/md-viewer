@@ -115,6 +115,13 @@ export interface Translations {
     authorNotice: string;
     generating: string;
     updating: string;
+    passwordLabel: string;
+    passwordPlaceholder: string;
+    passwordHint: string;
+    burnAfterReadLabel: string;
+    burnAfterReadDesc: string;
+    protectedBadge: string;
+    burnBadge: string;
   };
   urlModal: {
     title: string;
@@ -186,6 +193,20 @@ export interface Translations {
     close: string;
     panHint: string;
     mobileHint: string;
+  };
+  protectedDoc: {
+    lockedTitle: string;
+    lockedSubtitle: string;
+    passwordPlaceholder: string;
+    unlockBtn: string;
+    unlocking: string;
+    wrongPassword: string;
+    rateLimited: string;
+    burnedTitle: string;
+    burnedSubtitle: string;
+    burnedAction: string;
+    burnWarningBanner: string;
+    burnWarningSub: string;
   };
 }
 
@@ -305,6 +326,13 @@ export const translations: Record<Language, Translations> = {
       authorNotice: 'Only you can update this link from this browser.',
       generating: 'Generating link...',
       updating: 'Updating link...',
+      passwordLabel: 'Protect with Password (Optional)',
+      passwordPlaceholder: 'Enter a password or PIN',
+      passwordHint: 'Readers must enter this password to view the document',
+      burnAfterReadLabel: 'Burn after reading (1x view)',
+      burnAfterReadDesc: 'Permanently deletes content from server after it is opened once',
+      protectedBadge: 'Password Protected',
+      burnBadge: '1x View (Self-destruct)',
     },
     urlModal: {
       title: 'Import from URL',
@@ -376,6 +404,20 @@ export const translations: Record<Language, Translations> = {
       close: 'Close',
       panHint: 'Click and drag to pan • Scroll to zoom',
       mobileHint: 'Drag to pan • Pinch to zoom',
+    },
+    protectedDoc: {
+      lockedTitle: 'Protected Document',
+      lockedSubtitle: 'This document is protected with a password. Enter password to view.',
+      passwordPlaceholder: 'Enter document password...',
+      unlockBtn: 'Unlock Document',
+      unlocking: 'Unlocking...',
+      wrongPassword: 'Incorrect password. Please try again.',
+      rateLimited: 'Too many incorrect attempts. Please wait 1 minute.',
+      burnedTitle: 'Document Destroyed',
+      burnedSubtitle: 'This document was configured to burn after reading and has already been opened and permanently deleted from the server.',
+      burnedAction: 'Create New Document',
+      burnWarningBanner: 'Self-Destruct Active: This document is set to burn after reading. The content has been permanently erased from the server. Do not refresh or close this tab if you still need it.',
+      burnWarningSub: 'Once you navigate away or refresh, it cannot be accessed again.',
     },
   },
   id: {
@@ -493,6 +535,13 @@ export const translations: Record<Language, Translations> = {
       authorNotice: 'Hanya Anda yang dapat memperbarui tautan ini dari browser ini.',
       generating: 'Membuat tautan...',
       updating: 'Memperbarui tautan...',
+      passwordLabel: 'Lindungi dengan Kata Sandi (Opsional)',
+      passwordPlaceholder: 'Masukkan kata sandi atau PIN',
+      passwordHint: 'Pembaca wajib memasukkan kata sandi ini untuk melihat dokumen',
+      burnAfterReadLabel: 'Burn after reading (1x lihat)',
+      burnAfterReadDesc: 'Hapus konten secara permanen dari server setelah dibuka 1 kali',
+      protectedBadge: 'Dilindungi Kata Sandi',
+      burnBadge: '1x Lihat (Hangus otomatis)',
     },
     urlModal: {
       title: 'Buka dari URL',
@@ -564,6 +613,20 @@ export const translations: Record<Language, Translations> = {
       close: 'Tutup',
       panHint: 'Geser untuk memindahkan • Gulir untuk zoom',
       mobileHint: 'Geser untuk memindahkan • Cubit untuk zoom',
+    },
+    protectedDoc: {
+      lockedTitle: 'Dokumen Terproteksi',
+      lockedSubtitle: 'Dokumen ini dilindungi dengan kata sandi. Masukkan kata sandi untuk membukanya.',
+      passwordPlaceholder: 'Masukkan kata sandi dokumen...',
+      unlockBtn: 'Buka Dokumen',
+      unlocking: 'Membuka...',
+      wrongPassword: 'Kata sandi salah. Silakan coba lagi.',
+      rateLimited: 'Terlalu banyak percobaan salah. Silakan tunggu 1 menit.',
+      burnedTitle: 'Dokumen Telah Dimusnahkan',
+      burnedSubtitle: 'Dokumen ini dikonfigurasi untuk hangus setelah dibaca (burn after reading) dan telah dibuka serta dihapus permanen dari server.',
+      burnedAction: 'Buat Dokumen Baru',
+      burnWarningBanner: 'Self-Destruct Aktif: Dokumen ini bersifat sekali lihat. Konten telah dihapus permanen dari server. Jangan me-refresh atau menutup tab jika masih ingin membaca.',
+      burnWarningSub: 'Jika Anda me-refresh atau menutup tab, dokumen tidak dapat diakses kembali.',
     },
   },
 };

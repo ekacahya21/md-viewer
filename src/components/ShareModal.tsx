@@ -13,6 +13,10 @@ import {
   PlusCircle,
   CheckCircle2,
   ArrowLeft,
+  Lock,
+  Flame,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { copyText } from '../utils/exportUtils';
@@ -39,6 +43,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   language,
 }) => {
   const [expirationOption, setExpirationOption] = useState<'never' | '7d' | '30d' | '1y'>('never');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [burnAfterRead, setBurnAfterRead] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateSuccess, setUpdateSuccess] = useState(false);
@@ -57,6 +64,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     if (isOpen) {
       setActiveLink(sharedLink);
       setIsCreatingNew(!sharedLink);
+      setPassword('');
+      setShowPassword(false);
+      setBurnAfterRead(false);
       setError(null);
       setUpdateSuccess(false);
       setCopied(false);
@@ -112,6 +122,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           title,
           content,
           expiresAt,
+          password: password.trim() ? password.trim() : undefined,
+          burnAfterRead: burnAfterRead || undefined,
         }),
       });
 
@@ -128,6 +140,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
         expiresAt: data.expiresAt,
+        isProtected: data.isProtected,
+        isBurnAfterRead: data.isBurnAfterRead,
       };
 
       setActiveLink(newInfo);
@@ -349,6 +363,22 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                     {activeLink.expiresAt ? formatDate(activeLink.expiresAt) : (language === 'id' ? 'Permanen (Selamanya)' : 'Permanent (Never)')}
                   </div>
                 </div>
+                {(activeLink.isProtected || activeLink.isBurnAfterRead) && (
+                  <div className="flex flex-wrap gap-1.5 pt-1.5 justify-center sm:justify-start">
+                    {activeLink.isProtected && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                        <Lock className="w-3 h-3" />
+                        <span>{t.shareModal.protectedBadge}</span>
+                      </span>
+                    )}
+                    {activeLink.isBurnAfterRead && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                        <Flame className="w-3 h-3" />
+                        <span>{t.shareModal.burnBadge}</span>
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -433,6 +463,55 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Password Protection */}
+            <div>
+              <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5 flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-[var(--accent-amber)]" />
+                <span>{t.shareModal.passwordLabel}</span>
+              </label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={t.shareModal.passwordPlaceholder}
+                  className="w-full pl-3 pr-10 py-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs sm:text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-hidden focus:border-[var(--accent-amber)] transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 transition-colors cursor-pointer"
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)] mt-1">
+                {t.shareModal.passwordHint}
+              </p>
+            </div>
+
+            {/* Burn After Reading Toggle */}
+            <div className="p-3 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
+              <label className="flex items-start gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={burnAfterRead}
+                  onChange={(e) => setBurnAfterRead(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-[var(--border-subtle)] text-[var(--accent-amber)] focus:ring-[var(--accent-amber)] cursor-pointer"
+                />
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-primary)]">
+                    <Flame className={`w-3.5 h-3.5 ${burnAfterRead ? 'text-rose-500' : 'text-[var(--text-muted)]'}`} />
+                    <span>{t.shareModal.burnAfterReadLabel}</span>
+                  </div>
+                  <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
+                    {t.shareModal.burnAfterReadDesc}
+                  </p>
+                </div>
+              </label>
             </div>
 
             <div className="p-3 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-xs text-[var(--text-secondary)] space-y-1">
