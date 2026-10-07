@@ -114,3 +114,124 @@ test('Share API - successfully creates and retrieves shared document', async () 
   assert.equal(getJson.title, payload.title);
   assert.equal(getJson.content, payload.content);
 });
+
+test('Share API - password protected document requires password to reveal content', async () => {
+  const payload = {
+    title: 'Secret Blueprint',
+    content: '# Classified Information\nDo not share publicly.',
+    password: 'super-secret-password-123',
+  };
+
+  const createRes = await fetch(`${BASE_URL}/api/share`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  assert.equal(createRes.status, 201);
+  const created = await createRes.json();
+  assert.equal(created.isProtected, true);
+
+  // 1. Fetch without password: should return title and isProtected, but NO content
+  const lockedRes = await fetch(`${BASE_URL}/api/share/${created.id}`);
+  assert.equal(lockedRes.status, 200);
+  const lockedJson = await lockedRes.json();
+  assert.equal(lockedJson.isProtected, true);
+  assert.equal(lockedJson.content, undefined);
+  assert.equal(lockedJson.title, payload.title);
+
+  // 2. Fetch with incorrect password: should return 401
+  const wrongRes = await fetch(`${BASE_URL}/api/share/${created.id}`, {
+    headers: { 'X-Doc-Password': 'wrong-password' },
+  });
+  assert.equal(wrongRes.status, 401);
+  const wrongJson = await wrongRes.json();
+  assert.equal(wrongJson.isInvalidPassword, true);
+
+  // 3. Fetch with correct password via header: should return full content
+  const unlockRes = await fetch(`${BASE_URL}/api/share/${created.id}`, {
+    headers: { 'X-Doc-Password': 'super-secret-password-123' },
+  });
+  assert.equal(unlockRes.status, 200);
+  const unlockJson = await unlockRes.json();
+  assert.equal(unlockJson.content, payload.content);
+
+  // 4. Unlock via POST /api/share/:id/unlock
+  const postUnlockRes = await fetch(`${BASE_URL}/api/share/${created.id}/unlock`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: 'super-secret-password-123' }),
+  });
+  assert.equal(postUnlockRes.status, 200);
+  const postUnlockJson = await postUnlockRes.json();
+  assert.equal(postUnlockJson.content, payload.content);
+});
+
+test('Share API - burn after reading document burns on first visitor view', async () => {
+  const payload = {
+    title: 'Self Destructing Note',
+    content: 'This message will self-destruct after reading.',
+    burnAfterRead: true,
+  };
+
+  const createRes = await fetch(`${BASE_URL}/api/share`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  assert.equal(createRes.status, 201);
+  const created = await createRes.json();
+  assert.equal(created.isBurnAfterRead, true);
+
+  // 1. Author views with edit token -> Should NOT burn the document
+  const authorRes = await fetch(`${BASE_URL}/api/share/${created.id}`, {
+    headers: { 'X-Edit-Token': created.editToken },
+  });
+  assert.equal(authorRes.status, 200);
+  const authorJson = await authorRes.json();
+  assert.equal(authorJson.content, payload.content);
+
+  // 2. First recipient view -> Document is returned and immediately burned
+  const recipientRes = await fetch(`${BASE_URL}/api/share/${created.id}`, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0' },
+  });
+  assert.equal(recipientRes.status, 200);
+  const recipientJson = await recipientRes.json();
+  assert.equal(recipientJson.content, payload.content);
+  assert.equal(recipientJson.isBurnedNow, true);
+
+  // 3. Second recipient view -> Returns 410 Gone with isBurned: true
+  const burnedRes = await fetch(`${BASE_URL}/api/share/${created.id}`, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0' },
+  });
+  assert.equal(burnedRes.status, 410);
+  const burnedJson = await burnedRes.json();
+  assert.equal(burnedJson.isBurned, true);
+  assert.ok(burnedJson.error);
+});
+
+test('OpenGraph Meta Injection - hides content snippet for protected documents', async () => {
+  const payload = {
+    title: 'Top Secret Research',
+    content: 'Super sensitive content that must never appear in search previews or chat embeds.',
+    password: 'secret-password',
+  };
+
+  const createRes = await fetch(`${BASE_URL}/api/share`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const created = await createRes.json();
+
+  const spaRes = await fetch(`${BASE_URL}/s/${created.id}`);
+  assert.equal(spaRes.status, 200);
+  const html = await spaRes.text();
+
+  // Document title should be present
+  assert.ok(html.includes('Top Secret Research'));
+  // Sensitive content MUST NOT be present in meta description
+  assert.ok(!html.includes('Super sensitive content'));
+  assert.ok(html.includes('Dokumen ini dilindungi kata sandi'));
+});

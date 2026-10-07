@@ -19,6 +19,9 @@ export interface SharedLinkInfo {
   createdAt?: number;
   updatedAt?: number;
   expiresAt?: number | null;
+  isProtected?: boolean;
+  isBurnAfterRead?: boolean;
+  isBurned?: boolean;
 }
 
 export interface DocumentDraft {
@@ -42,6 +45,9 @@ export interface SharedDocMeta {
   createdAt: number;
   updatedAt?: number;
   expiresAt: number | null;
+  isProtected?: boolean;
+  isBurnAfterRead?: boolean;
+  isBurned?: boolean;
 }
 
 export interface SummaryData {

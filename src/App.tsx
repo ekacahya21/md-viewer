@@ -21,7 +21,7 @@ import {
 } from './utils/exportUtils';
 import type { ViewMode, ThemeMode, TypographyFont, DocumentDraft, ReadingStats, SharedDocMeta, SharedLinkInfo, Language } from './types';
 import { translations } from './i18n/translations';
-import { AlertCircle, ArrowLeft, Eye, GripVertical, Compass, ChevronRight, X, ShieldAlert } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Eye, GripVertical, Compass, ChevronRight, X, ShieldAlert, Lock, Flame, EyeOff, KeyRound, Loader2 } from 'lucide-react';
 import { useDocumentSummary } from './hooks/useDocumentSummary';
 import { ConfirmReplaceModal } from './components/ConfirmReplaceModal';
 
@@ -240,6 +240,14 @@ export function App() {
   const [isLoadingShared, setIsLoadingShared] = useState<boolean>(isInitialSharedPath);
   const [sharedMeta, setSharedMeta] = useState<SharedDocMeta | null>(null);
   const [sharedError, setSharedError] = useState<string | null>(null);
+  const [isBurned, setIsBurned] = useState<boolean>(false);
+  const [isProtectedLocked, setIsProtectedLocked] = useState<boolean>(false);
+  const [unlockPassword, setUnlockPassword] = useState<string>('');
+  const [showUnlockPassword, setShowUnlockPassword] = useState<boolean>(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [isUnlocking, setIsUnlocking] = useState<boolean>(false);
+  const [isBurnWarningVisible, setIsBurnWarningVisible] = useState<boolean>(false);
+  const [currentShortId, setCurrentShortId] = useState<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
@@ -406,12 +414,21 @@ export function App() {
     if (pathname.startsWith('/s/')) {
       const shortId = pathname.replace(/^\/s\//, '').trim();
       if (shortId) {
+        setCurrentShortId(shortId);
         setIsLoadingShared(true);
         const requestHeaders: Record<string, string> = {};
         const visitorId = getOrCreateVisitorId();
         if (visitorId) {
           requestHeaders['X-Visitor-Id'] = visitorId;
         }
+
+        // Pass cached password from sessionStorage if present
+        try {
+          const cachedPwd = sessionStorage.getItem(`mdv_doc_pwd_${shortId}`);
+          if (cachedPwd) {
+            requestHeaders['X-Doc-Password'] = cachedPwd;
+          }
+        } catch {}
 
         // Pass author edit token if client created or owns this document
         try {
@@ -434,20 +451,49 @@ export function App() {
           .then(async (res) => {
             if (!res.ok) {
               const err = await res.json().catch(() => ({}));
+              if (err.isBurned) {
+                setIsBurned(true);
+                setTitle(err.title || (language === 'id' ? 'Dokumen Telah Dimusnahkan' : 'Document Destroyed'));
+                return null;
+              }
               throw new Error(err.error || (language === 'id' ? `HTTP ${res.status}: Dokumen tidak ditemukan.` : `HTTP ${res.status}: Document not found.`));
             }
             return res.json();
           })
           .then((data) => {
+            if (!data) return;
+            if (data.isProtected && !data.content) {
+              // Document requires password
+              setTitle(data.title || (language === 'id' ? 'Dokumen Terproteksi' : 'Protected Document'));
+              setIsProtectedLocked(true);
+              setSharedMeta({
+                id: data.id,
+                views: data.views,
+                createdAt: data.createdAt,
+                updatedAt: data.updatedAt,
+                expiresAt: data.expiresAt,
+                isProtected: true,
+                isBurnAfterRead: Boolean(data.isBurnAfterRead),
+              });
+              setIsSharedView(true);
+              return;
+            }
+
             setTitle(data.title || 'Shared Document');
             setContent(data.content);
             setIsSharedView(true);
+            setIsProtectedLocked(false);
+            if (data.isBurnAfterRead || data.isBurnedNow) {
+              setIsBurnWarningVisible(true);
+            }
             setSharedMeta({
               id: data.id,
               views: data.views,
               createdAt: data.createdAt,
               updatedAt: data.updatedAt,
               expiresAt: data.expiresAt,
+              isProtected: Boolean(data.isProtected),
+              isBurnAfterRead: Boolean(data.isBurnAfterRead),
             });
             setViewMode('reader');
           })
@@ -498,7 +544,80 @@ export function App() {
           setTitle('Welcome to MD Viewer');
         });
     }
-  }, []);
+  }, [language]);
+
+  // Unlock password protected document
+  const handleUnlockDocument = useCallback(async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!currentShortId || !unlockPassword.trim()) return;
+
+    setIsUnlocking(true);
+    setUnlockError(null);
+
+    try {
+      const requestHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Doc-Password': unlockPassword.trim(),
+      };
+      const visitorId = getOrCreateVisitorId();
+      if (visitorId) {
+        requestHeaders['X-Visitor-Id'] = visitorId;
+      }
+
+      const res = await fetch(`/api/share/${currentShortId}`, {
+        headers: requestHeaders,
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        if (res.status === 401) {
+          throw new Error(t.protectedDoc.wrongPassword);
+        }
+        if (res.status === 429) {
+          throw new Error(t.protectedDoc.rateLimited);
+        }
+        if (errorData.isBurned) {
+          setIsBurned(true);
+          setIsProtectedLocked(false);
+          return;
+        }
+        throw new Error(errorData.error || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (!data.content) {
+        throw new Error(t.protectedDoc.wrongPassword);
+      }
+
+      // Cache password in sessionStorage only if not burn-after-read
+      if (!data.isBurnAfterRead) {
+        try {
+          sessionStorage.setItem(`mdv_doc_pwd_${currentShortId}`, unlockPassword.trim());
+        } catch {}
+      }
+
+      setContent(data.content);
+      setTitle(data.title || 'Shared Document');
+      setIsProtectedLocked(false);
+      if (data.isBurnAfterRead || data.isBurnedNow) {
+        setIsBurnWarningVisible(true);
+      }
+      setSharedMeta({
+        id: data.id,
+        views: data.views,
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
+        expiresAt: data.expiresAt,
+        isProtected: true,
+        isBurnAfterRead: Boolean(data.isBurnAfterRead),
+      });
+      setViewMode('reader');
+    } catch (err: unknown) {
+      setUnlockError(err instanceof Error ? err.message : t.protectedDoc.wrongPassword);
+    } finally {
+      setIsUnlocking(false);
+    }
+  }, [currentShortId, unlockPassword, t.protectedDoc]);
 
   // Parse markdown content
   const parseResult = useMemo(() => {
@@ -936,8 +1055,120 @@ export function App() {
         </div>
       )}
 
-      {/* Shared Error Screen (if 404/expired) */}
-      {sharedError ? (
+      {/* Burn After Reading Warning Banner */}
+      {isBurnWarningVisible && (
+        <div className="bg-amber-500/10 dark:bg-amber-950/30 border-b border-amber-500/20 px-4 py-2 text-xs text-amber-800 dark:text-amber-200 flex items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <Flame className="w-4 h-4 text-rose-500 shrink-0 animate-pulse" />
+            <span className="font-semibold">{t.protectedDoc.burnWarningBanner}</span>
+          </div>
+          <button
+            onClick={() => setIsBurnWarningVisible(false)}
+            className="p-1 rounded-md hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 transition-colors shrink-0 cursor-pointer"
+            title={t.banner.dismiss}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Shared Error / Burned / Password-Protected Locked Screen */}
+      {isBurned ? (
+        <div className="flex-1 min-w-0 w-full flex flex-col items-center justify-center p-6 text-center animate-in fade-in">
+          <div className="w-16 h-16 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mb-4 ring-8 ring-rose-500/5">
+            <Flame className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-bold mb-2 text-[var(--text-primary)]">{t.protectedDoc.burnedTitle}</h2>
+          <p className="text-sm text-[var(--text-secondary)] max-w-md mb-6 leading-relaxed">
+            {t.protectedDoc.burnedSubtitle}
+          </p>
+          <a
+            href="/"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-amber)] text-white font-semibold text-sm hover:brightness-110 transition-all shadow-sm"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>{t.protectedDoc.burnedAction}</span>
+          </a>
+        </div>
+      ) : isProtectedLocked ? (
+        <div className="flex-1 min-w-0 w-full flex flex-col items-center justify-center p-6 text-center animate-in fade-in">
+          <div className="w-full max-w-md p-6 sm:p-8 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-2xl space-y-5 text-left">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-[var(--accent-surface)] text-[var(--accent-amber)] flex items-center justify-center shrink-0">
+                <Lock className="w-6 h-6" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-base sm:text-lg font-bold text-[var(--text-primary)] truncate">
+                  {title || t.protectedDoc.lockedTitle}
+                </h2>
+                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                  {t.protectedDoc.lockedSubtitle}
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleUnlockDocument} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5 flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-[var(--accent-amber)]" />
+                  <span>{language === 'id' ? 'Kata Sandi Dokumen' : 'Document Password'}</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showUnlockPassword ? 'text' : 'password'}
+                    value={unlockPassword}
+                    onChange={(e) => setUnlockPassword(e.target.value)}
+                    placeholder={t.protectedDoc.passwordPlaceholder}
+                    autoFocus
+                    required
+                    className="w-full pl-3 pr-10 py-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-hidden focus:border-[var(--accent-amber)] transition-colors font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowUnlockPassword(!showUnlockPassword)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 transition-colors cursor-pointer"
+                    title={showUnlockPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showUnlockPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {unlockError && (
+                <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-800 dark:text-rose-200 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{unlockError}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isUnlocking || !unlockPassword.trim()}
+                className="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-[var(--accent-amber)] text-white hover:brightness-110 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+              >
+                {isUnlocking ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>{t.protectedDoc.unlocking}</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    <span>{t.protectedDoc.unlockBtn}</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            {sharedMeta?.isBurnAfterRead && (
+              <div className="pt-3 border-t border-[var(--border-subtle)] flex items-center gap-2 text-xs text-rose-600 dark:text-rose-400">
+                <Flame className="w-4 h-4 shrink-0" />
+                <span>{language === 'id' ? 'Perhatian: Dokumen ini akan hangus setelah dibuka.' : 'Notice: This document is configured to self-destruct once opened.'}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : sharedError ? (
         <div className="flex-1 min-w-0 w-full flex flex-col items-center justify-center p-6 text-center">
           <div className="w-14 h-14 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mb-4">
             <AlertCircle className="w-7 h-7" />

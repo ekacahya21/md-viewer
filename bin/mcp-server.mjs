@@ -131,6 +131,14 @@ const TOOLS = [
           enum: ['never', '7d', '30d', '1y'],
           description: 'Optional expiration duration (default: never).',
         },
+        password: {
+          type: 'string',
+          description: 'Optional password/PIN to protect the document (readers must enter this password).',
+        },
+        burnAfterRead: {
+          type: 'boolean',
+          description: 'Optional flag to enable self-destruct after 1 view (burn after reading).',
+        },
       },
       required: ['content'],
     },
@@ -174,6 +182,10 @@ const TOOLS = [
           type: 'string',
           description: 'The 7-character document ID (e.g., mQQSZ3K) or full URL (/s/mQQSZ3K).',
         },
+        password: {
+          type: 'string',
+          description: 'Optional password required if the document is protected.',
+        },
       },
       required: ['id'],
     },
@@ -200,6 +212,8 @@ async function executePublishDocument(args) {
     title,
     content,
     expiresAt,
+    password: args.password ? String(args.password).trim() : undefined,
+    burnAfterRead: Boolean(args.burnAfterRead),
   };
 
   const response = await fetch(`${SERVER}/api/share`, {
@@ -234,8 +248,10 @@ async function executePublishDocument(args) {
     `• ID: ${data.id}`,
     `• Title: ${data.title || title}`,
     `• Expires: ${expireText}`,
+    args.password ? '• Security: 🔒 Password protected' : null,
+    args.burnAfterRead ? '• Self-destruct: 🔥 Burn after reading (1x view)' : null,
     `• Edit Token: (saved to ~/.config/mdv/tokens.json)`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   return {
     content: [{ type: 'text', text: outputText }],
@@ -335,13 +351,31 @@ async function executeGetDocument(args) {
     };
   }
 
-  const response = await fetch(`${SERVER}/api/share/${encodeURIComponent(docId)}`);
+  const headers = {};
+  if (args.password) {
+    headers['X-Doc-Password'] = String(args.password);
+  }
+
+  const response = await fetch(`${SERVER}/api/share/${encodeURIComponent(docId)}`, { headers });
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    if (data.isBurned) {
+      return {
+        content: [{ type: 'text', text: `Failed to retrieve document: This document was set to burn after reading and has already been destroyed.` }],
+        isError: true,
+      };
+    }
     const errorMsg = data.error || `HTTP ${response.status} ${response.statusText}`;
     return {
       content: [{ type: 'text', text: `Failed to retrieve document: ${errorMsg}` }],
+      isError: true,
+    };
+  }
+
+  if (data.isProtected && !data.content) {
+    return {
+      content: [{ type: 'text', text: `This document is protected with a password. Please provide the 'password' parameter in get_document to unlock it.` }],
       isError: true,
     };
   }
