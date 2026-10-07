@@ -107,13 +107,16 @@ jobs:
           echo "=========================================================="
 
       - name: Verify SSH Credentials
-        if: "${{ secrets.SSH_HOST == '' || secrets.SSH_KEY == '' }}"
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
         run: |
-          echo "::error title=Missing SSH Secrets::SSH_HOST and SSH_KEY must be configured in GitHub Repository Secrets (Settings > Secrets and variables > Actions)."
-          exit 1
+          if [ -z "$SSH_HOST" ] || [ -z "$SSH_KEY" ]; then
+            echo "::error title=Missing SSH Secrets::SSH_HOST and SSH_KEY must be configured in GitHub Repository Secrets (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
 
       - name: Execute Server Deployment Pipeline via SSH
-        if: "${{ secrets.SSH_HOST != '' && secrets.SSH_KEY != '' }}"
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
