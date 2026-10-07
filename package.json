@@ -1,6 +1,6 @@
 {
   "name": "md-viewer",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Minimalist editorial Markdown studio & reader with native Mermaid diagrams, KaTeX math formulas, zero-signup document sharing, and distraction-free typography.",
   "author": "Eka Cahya",
   "license": "MIT",
