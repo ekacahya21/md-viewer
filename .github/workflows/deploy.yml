@@ -25,6 +25,23 @@ on:
         required: false
         default: false
         type: boolean
+  workflow_call:
+    inputs:
+      action:
+        description: 'Pilih aksi deployment'
+        required: false
+        default: 'deploy'
+        type: string
+      target_ref:
+        description: 'Branch atau Tag target (default: main)'
+        required: false
+        default: 'main'
+        type: string
+      skip_tests:
+        description: 'Lewati pre-flight tests di cloud (darurat)'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: production-deploy
@@ -37,10 +54,12 @@ jobs:
   quality-gate:
     name: 🛡️ Pre-Flight Verification & Quality Gates
     runs-on: ubuntu-latest
-    if: github.event.inputs.action != 'rollback' && github.event.inputs.skip_tests != 'true'
+    if: (inputs.action || github.event.inputs.action) != 'rollback' && (inputs.skip_tests || github.event.inputs.skip_tests) != true && (inputs.skip_tests || github.event.inputs.skip_tests) != 'true'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref || github.event.inputs.target_ref || github.ref }}
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
@@ -75,14 +94,14 @@ jobs:
   deploy:
     name: 🚀 Production Rollout (with Fail-Safe)
     needs: quality-gate
-    if: always() && (needs.quality-gate.result == 'success' || needs.quality-gate.result == 'skipped' || github.event.inputs.action == 'rollback')
+    if: always() && (needs.quality-gate.result == 'success' || needs.quality-gate.result == 'skipped' || (inputs.action || github.event.inputs.action) == 'rollback')
     runs-on: ubuntu-latest
     steps:
       - name: Announce Deployment Details
         run: |
           echo "=========================================================="
-          echo "Aksi: ${{ github.event.inputs.action || 'deploy' }}"
-          echo "Target Ref: ${{ github.event.inputs.target_ref || github.ref_name }}"
+          echo "Aksi: ${{ inputs.action || github.event.inputs.action || 'deploy' }}"
+          echo "Target Ref: ${{ inputs.target_ref || github.event.inputs.target_ref || github.ref_name }}"
           echo "Commit SHA: ${{ github.sha }}"
           echo "Pemicu: ${{ github.event_name }}"
           echo "=========================================================="
@@ -107,8 +126,8 @@ jobs:
             set -e
             cd /home/ubuntu/md-viewer
             
-            ACTION="${{ github.event.inputs.action || 'deploy' }}"
-            TARGET_REF="${{ github.event.inputs.target_ref || github.ref_name }}"
+            ACTION="${{ inputs.action || github.event.inputs.action || 'deploy' }}"
+            TARGET_REF="${{ inputs.target_ref || github.event.inputs.target_ref || github.ref_name }}"
             
             echo "Executing remote action: $ACTION for ref: $TARGET_REF on $(hostname)..."
             
@@ -153,7 +172,7 @@ jobs:
   public-health-check:
     name: 🌐 Synthetic Public Endpoint Verification
     needs: deploy
-    if: always() && needs.deploy.result == 'success' && github.event.inputs.action != 'deploy-dry-run'
+    if: always() && needs.deploy.result == 'success' && (inputs.action || github.event.inputs.action) != 'deploy-dry-run'
     runs-on: ubuntu-latest
     steps:
       - name: Probe Live Production Endpoint from GitHub Cloud

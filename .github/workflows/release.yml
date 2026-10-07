@@ -1,0 +1,142 @@
+name: Release & Semantic Versioning Pipeline
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Pilih tipe SemVer bump (auto / patch / minor / major / skip)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+          - skip
+
+concurrency:
+  group: release-versioning
+  cancel-in-progress: false
+
+jobs:
+  # ============================================================================
+  # JOB 1: SemVer Release Decision, Tagging & GitHub Release Creation
+  # ============================================================================
+  release:
+    name: 🏷️ Release & Semantic Versioning
+    if: (github.event_name == 'pull_request' && github.event.pull_request.merged == true) || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      should_deploy: ${{ steps.analyze.outputs.should_deploy }}
+      bump_type: ${{ steps.analyze.outputs.bump_type }}
+      new_version: ${{ steps.analyze.outputs.new_version }}
+      new_tag: ${{ steps.analyze.outputs.new_tag }}
+      reason: ${{ steps.analyze.outputs.reason }}
+
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Collect Changed Files
+        id: collect_changes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Fetching file diff for merged PR #${{ github.event.pull_request.number }}..."
+            gh pr diff "${{ github.event.pull_request.number }}" --name-only > changed_files.txt 2>/dev/null || git diff HEAD~1 HEAD --name-only > changed_files.txt
+          else
+            echo "Inspecting commit changes for workflow dispatch..."
+            git diff HEAD~1 HEAD --name-only > changed_files.txt || touch changed_files.txt
+          fi
+          echo "Changed files detected:"
+          cat changed_files.txt
+
+      - name: Analyze Changes & Determine SemVer Bump
+        id: analyze
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title || github.event.head_commit.message }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BUMP_OVERRIDE: ${{ inputs.bump_type || 'auto' }}
+          CHANGED_FILES_FILE: changed_files.txt
+        run: |
+          node scripts/determine-release.mjs
+
+      - name: Apply Version Bump & Push Tag
+        if: steps.analyze.outputs.should_deploy == 'true'
+        env:
+          NEW_VERSION: ${{ steps.analyze.outputs.new_version }}
+          NEW_TAG: ${{ steps.analyze.outputs.new_tag }}
+        run: |
+          echo "Updating version to $NEW_VERSION and creating git tag $NEW_TAG..."
+          
+          # Configure git author
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Bump package.json and package-lock.json
+          npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
+          
+          # Commit version bump back to main branch with [skip ci]
+          git add package.json package-lock.json
+          git commit -m "chore(release): $NEW_TAG [skip ci]"
+          
+          # Create annotated git tag
+          git tag -a "$NEW_TAG" -m "Release $NEW_TAG"
+          
+          # Push commit and tag to remote
+          git fetch origin main
+          git rebase origin/main
+          git push origin main
+          git push origin "$NEW_TAG"
+
+      - name: Create GitHub Release
+        if: steps.analyze.outputs.should_deploy == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_TAG: ${{ steps.analyze.outputs.new_tag }}
+        run: |
+          echo "Publishing GitHub Release for $NEW_TAG..."
+          gh release create "$NEW_TAG" \
+            --title "$NEW_TAG" \
+            --generate-notes
+
+      - name: Summary Notice
+        run: |
+          echo "=========================================================="
+          echo "Should Deploy: ${{ steps.analyze.outputs.should_deploy }}"
+          echo "Bump Type:     ${{ steps.analyze.outputs.bump_type }}"
+          echo "New Version:   ${{ steps.analyze.outputs.new_version }}"
+          echo "New Tag:       ${{ steps.analyze.outputs.new_tag }}"
+          echo "Reason:        ${{ steps.analyze.outputs.reason }}"
+          echo "=========================================================="
+
+  # ============================================================================
+  # JOB 2: Trigger Production Deployment Pipeline
+  # ============================================================================
+  deploy:
+    name: 🚀 Production Rollout
+    needs: release
+    if: needs.release.outputs.should_deploy == 'true'
+    uses: ./.github/workflows/deploy.yml
+    with:
+      action: deploy
+      target_ref: ${{ needs.release.outputs.new_tag }}
+      skip_tests: false
+    secrets: inherit

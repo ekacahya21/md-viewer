@@ -69,11 +69,11 @@ Before submitting a Pull Request, please ensure all checks pass:
 
 - **Default Branch:** `main`
 - **Feature Branches:** Use descriptive names like `feat/mermaid-zoom`, `fix/mobile-table-scroll`, or `docs/update-readme`.
-- **Commit Messages:** Follow [Conventional Commits](https://www.conventionalcommits.org/):
-  - `feat: add export to docx`
-  - `fix: prevent layout shift on KaTeX rendering`
-  - `docs: improve contributing instructions`
-  - `test: add unit test for sanitizeMarkdown`
+- **Commit & PR Conventions:** MD Viewer uses automated Semantic Versioning triggered when Pull Requests are merged into `main`:
+  - `feat:` -> triggers a **minor** release (e.g. `1.0.0` -> `1.1.0`)
+  - `fix:`, `perf:`, `refactor:` -> triggers a **patch** release (e.g. `1.0.0` -> `1.0.1`)
+  - `feat!:`, `fix!:`, or `BREAKING CHANGE:` -> triggers a **major** release (e.g. `1.0.0` -> `2.0.0`)
+  - `docs:`, `test:`, `ci:`, `style:`, `chore:` -> release is automatically skipped if only documentation, CI workflows, or test suites are modified.
 
 ---
 
