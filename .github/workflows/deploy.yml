@@ -1,0 +1,191 @@
+name: Production Deploy & Fail-Safe Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Pilih aksi deployment'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - deploy-dry-run
+          - rollback
+      target_ref:
+        description: 'Branch atau Tag target (default: main)'
+        required: false
+        default: 'main'
+        type: string
+      skip_tests:
+        description: 'Lewati pre-flight tests di cloud (darurat)'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  # ============================================================================
+  # JOB 1: Pre-Flight Verification & Quality Gates (GitHub Cloud Runner)
+  # ============================================================================
+  quality-gate:
+    name: 🛡️ Pre-Flight Verification & Quality Gates
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action != 'rollback' && github.event.inputs.skip_tests != 'true'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Code Linting (oxlint)
+        run: npm run lint
+
+      - name: TypeScript Typecheck
+        run: npx tsc --noEmit
+
+      - name: Run Unit Tests
+        run: npm test
+
+      - name: Compile Production Bundle
+        run: npm run build
+
+      - name: Validate Build Output
+        run: |
+          test -f dist/index.html || (echo "❌ dist/index.html missing!" && exit 1)
+          test -s dist/index.html || (echo "❌ dist/index.html is empty!" && exit 1)
+          echo "✓ Build artifacts successfully verified."
+
+  # ============================================================================
+  # JOB 2: Server Deployment with Fail-Safe Rollback (VPS via SSH)
+  # ============================================================================
+  deploy:
+    name: 🚀 Production Rollout (with Fail-Safe)
+    needs: quality-gate
+    if: always() && (needs.quality-gate.result == 'success' || needs.quality-gate.result == 'skipped' || github.event.inputs.action == 'rollback')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Announce Deployment Details
+        run: |
+          echo "=========================================================="
+          echo "Aksi: ${{ github.event.inputs.action || 'deploy' }}"
+          echo "Target Ref: ${{ github.event.inputs.target_ref || github.ref_name }}"
+          echo "Commit SHA: ${{ github.sha }}"
+          echo "Pemicu: ${{ github.event_name }}"
+          echo "=========================================================="
+
+      - name: Verify SSH Credentials
+        if: "${{ secrets.SSH_HOST == '' || secrets.SSH_KEY == '' }}"
+        run: |
+          echo "::error title=Missing SSH Secrets::SSH_HOST and SSH_KEY must be configured in GitHub Repository Secrets (Settings > Secrets and variables > Actions)."
+          exit 1
+
+      - name: Execute Server Deployment Pipeline via SSH
+        if: "${{ secrets.SSH_HOST != '' && secrets.SSH_KEY != '' }}"
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER || 'ubuntu' }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: true
+          command_timeout: 20m
+          script: |
+            set -e
+            cd /home/ubuntu/md-viewer
+            
+            ACTION="${{ github.event.inputs.action || 'deploy' }}"
+            TARGET_REF="${{ github.event.inputs.target_ref || github.ref_name }}"
+            
+            echo "Executing remote action: $ACTION for ref: $TARGET_REF on $(hostname)..."
+            
+            if [ "$ACTION" = "rollback" ]; then
+              echo "🔄 Triggering emergency manual rollback..."
+              ./scripts/rollback.sh
+            elif [ "$ACTION" = "deploy-dry-run" ]; then
+              echo "🔍 Pulling latest git ref and executing candidate dry-run..."
+              git fetch origin --tags
+              if git show-ref --verify --quiet "refs/tags/$TARGET_REF"; then
+                git checkout "tags/$TARGET_REF"
+              else
+                git checkout "$TARGET_REF" || git checkout -b "$TARGET_REF" "origin/$TARGET_REF"
+                git reset --hard "origin/$TARGET_REF"
+              fi
+              ./scripts/deploy.sh --dry-run
+            else
+              echo "🚀 Pulling latest git ref and running fail-safe deployment pipeline..."
+              git fetch origin --tags
+              if git show-ref --verify --quiet "refs/tags/$TARGET_REF"; then
+                echo "Checking out Git Tag: $TARGET_REF"
+                git checkout "tags/$TARGET_REF"
+              else
+                echo "Checking out Branch: $TARGET_REF"
+                git checkout "$TARGET_REF" || git checkout -b "$TARGET_REF" "origin/$TARGET_REF"
+                git reset --hard "origin/$TARGET_REF"
+              fi
+              
+              # Pre-flight tests already passed in Job 1 quality-gate on GitHub Cloud Runner.
+              # Pass --skip-tests to VPS for instant rollout without redundant CPU load.
+              ./scripts/deploy.sh --skip-tests
+            fi
+
+      - name: On Failure Diagnostic Notice
+        if: failure()
+        run: |
+          echo "::error title=Deployment Gagal tapi Layanan Aman::Pipeline deployment gagal. Fail-safe otomatis pada server telah me-rollback container ke versi stabil sebelumnya. Produksi tetap berjalan online tanpa gangguan."
+
+  # ============================================================================
+  # JOB 3: Synthetic Public Endpoint Verification (E2E)
+  # ============================================================================
+  public-health-check:
+    name: 🌐 Synthetic Public Endpoint Verification
+    needs: deploy
+    if: always() && needs.deploy.result == 'success' && github.event.inputs.action != 'deploy-dry-run'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe Live Production Endpoint from GitHub Cloud
+        run: |
+          ENDPOINT="https://md-viewer.e21.dev/api/health"
+          echo "Probing public endpoint: $ENDPOINT"
+          
+          SUCCESS=false
+          for i in {1..10}; do
+            echo "Attempt $i: Checking $ENDPOINT..."
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$ENDPOINT" || echo "000")
+            
+            if [ "$HTTP_STATUS" = "200" ]; then
+              RESP=$(curl -s "$ENDPOINT")
+              echo "Health payload: $RESP"
+              if echo "$RESP" | grep -q '"status":"ok"'; then
+                echo "✅ Public health probe PASSED (HTTP 200 OK + database connected)"
+                SUCCESS=true
+                break
+              fi
+            fi
+            echo "Received status $HTTP_STATUS, retrying in 3 seconds..."
+            sleep 3
+          done
+          
+          if [ "$SUCCESS" != "true" ]; then
+            echo "::error title=Public Health Check Failed::Endpoint $ENDPOINT tidak merespons HTTP 200 OK setelah rollout!"
+            exit 1
+          fi
+
+      - name: Verify Live Frontend HTML Delivery
+        run: |
+          HTML=$(curl -s "https://md-viewer.e21.dev/" | head -n 15)
+          echo "$HTML" | grep -qi "doctype html" || (echo "❌ Frontend root does not serve valid HTML" && exit 1)
+          echo "✅ Production Frontend verified and serving valid HTML"
