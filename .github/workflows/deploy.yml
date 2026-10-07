@@ -54,12 +54,12 @@ jobs:
   quality-gate:
     name: Pre-Flight Verification & Quality Gates
     runs-on: ubuntu-latest
-    if: (inputs.action || github.event.inputs.action) != 'rollback' && (inputs.skip_tests || github.event.inputs.skip_tests) != true && (inputs.skip_tests || github.event.inputs.skip_tests) != 'true'
+    if: inputs.action != 'rollback' && inputs.skip_tests != true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.target_ref || github.event.inputs.target_ref || github.ref }}
+          ref: ${{ inputs.target_ref }}
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
@@ -94,43 +94,59 @@ jobs:
   deploy:
     name: Production Rollout (with Fail-Safe)
     needs: quality-gate
-    if: always() && (needs.quality-gate.result == 'success' || needs.quality-gate.result == 'skipped' || (inputs.action || github.event.inputs.action) == 'rollback')
+    if: always() && (needs.quality-gate.result == 'success' || needs.quality-gate.result == 'skipped' || inputs.action == 'rollback')
     runs-on: ubuntu-latest
     steps:
-      - name: Announce Deployment Details
-        run: |
-          echo "=========================================================="
-          echo "Aksi: ${{ inputs.action || github.event.inputs.action || 'deploy' }}"
-          echo "Target Ref: ${{ inputs.target_ref || github.event.inputs.target_ref || github.ref_name }}"
-          echo "Commit SHA: ${{ github.sha }}"
-          echo "Pemicu: ${{ github.event_name }}"
-          echo "=========================================================="
-
-      - name: Verify SSH Credentials
+      - name: Resolve Deployment Parameters & Verify Credentials
+        id: prep
         env:
+          INPUT_ACTION: ${{ inputs.action }}
+          INPUT_TARGET_REF: ${{ inputs.target_ref }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
           SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
         run: |
           if [ -z "$SSH_HOST" ] || [ -z "$SSH_KEY" ]; then
             echo "::error title=Missing SSH Secrets::SSH_HOST and SSH_KEY must be configured in GitHub Repository Secrets (Settings > Secrets and variables > Actions)."
             exit 1
           fi
 
+          ACTION="${INPUT_ACTION:-deploy}"
+          TARGET_REF="${INPUT_TARGET_REF:-${GITHUB_REF_NAME:-main}}"
+          SSH_USER="${SSH_USER:-ubuntu}"
+          SSH_PORT="${SSH_PORT:-22}"
+
+          echo "action=$ACTION" >> $GITHUB_OUTPUT
+          echo "target_ref=$TARGET_REF" >> $GITHUB_OUTPUT
+          echo "ssh_user=$SSH_USER" >> $GITHUB_OUTPUT
+          echo "ssh_port=$SSH_PORT" >> $GITHUB_OUTPUT
+
+          echo "=========================================================="
+          echo "Aksi: $ACTION"
+          echo "Target Ref: $TARGET_REF"
+          echo "SSH User: $SSH_USER"
+          echo "SSH Port: $SSH_PORT"
+          echo "Commit SHA: ${{ github.sha }}"
+          echo "Pemicu: ${{ github.event_name }}"
+          echo "=========================================================="
+
       - name: Execute Server Deployment Pipeline via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER || 'ubuntu' }}
+          username: ${{ steps.prep.outputs.ssh_user }}
           key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
+          port: ${{ steps.prep.outputs.ssh_port }}
           script_stop: true
           command_timeout: 20m
           script: |
             set -e
             cd /home/ubuntu/md-viewer
             
-            ACTION="${{ inputs.action || github.event.inputs.action || 'deploy' }}"
-            TARGET_REF="${{ inputs.target_ref || github.event.inputs.target_ref || github.ref_name }}"
+            ACTION="${{ steps.prep.outputs.action }}"
+            TARGET_REF="${{ steps.prep.outputs.target_ref }}"
             
             echo "Executing remote action: $ACTION for ref: $TARGET_REF on $(hostname)..."
             
@@ -175,7 +191,7 @@ jobs:
   public-health-check:
     name: Synthetic Public Endpoint Verification
     needs: deploy
-    if: always() && needs.deploy.result == 'success' && (inputs.action || github.event.inputs.action) != 'deploy-dry-run'
+    if: always() && needs.deploy.result == 'success' && inputs.action != 'deploy-dry-run'
     runs-on: ubuntu-latest
     steps:
       - name: Probe Live Production Endpoint from GitHub Cloud
