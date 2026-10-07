@@ -27,7 +27,7 @@ jobs:
   # JOB 1: SemVer Release Decision, Tagging & GitHub Release Creation
   # ============================================================================
   release:
-    name: 🏷️ Release & Semantic Versioning
+    name: Release & Semantic Versioning
     if: (github.event_name == 'pull_request' && github.event.pull_request.merged == true) || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
@@ -137,7 +137,7 @@ jobs:
   # JOB 2: Trigger Production Deployment Pipeline
   # ============================================================================
   deploy:
-    name: 🚀 Production Rollout
+    name: Production Rollout
     needs: release
     if: needs.release.outputs.should_deploy == 'true'
     uses: ./.github/workflows/deploy.yml

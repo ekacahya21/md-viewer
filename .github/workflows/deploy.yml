@@ -52,7 +52,7 @@ jobs:
   # JOB 1: Pre-Flight Verification & Quality Gates (GitHub Cloud Runner)
   # ============================================================================
   quality-gate:
-    name: 🛡️ Pre-Flight Verification & Quality Gates
+    name: Pre-Flight Verification & Quality Gates
     runs-on: ubuntu-latest
     if: (inputs.action || github.event.inputs.action) != 'rollback' && (inputs.skip_tests || github.event.inputs.skip_tests) != true && (inputs.skip_tests || github.event.inputs.skip_tests) != 'true'
     steps:
@@ -92,7 +92,7 @@ jobs:
   # JOB 2: Server Deployment with Fail-Safe Rollback (VPS via SSH)
   # ============================================================================
   deploy:
-    name: 🚀 Production Rollout (with Fail-Safe)
+    name: Production Rollout (with Fail-Safe)
     needs: quality-gate
     if: always() && (needs.quality-gate.result == 'success' || needs.quality-gate.result == 'skipped' || (inputs.action || github.event.inputs.action) == 'rollback')
     runs-on: ubuntu-latest
@@ -135,10 +135,10 @@ jobs:
             echo "Executing remote action: $ACTION for ref: $TARGET_REF on $(hostname)..."
             
             if [ "$ACTION" = "rollback" ]; then
-              echo "🔄 Triggering emergency manual rollback..."
+              echo "Triggering emergency manual rollback..."
               ./scripts/rollback.sh
             elif [ "$ACTION" = "deploy-dry-run" ]; then
-              echo "🔍 Pulling latest git ref and executing candidate dry-run..."
+              echo "Pulling latest git ref and executing candidate dry-run..."
               git fetch origin --tags
               if git show-ref --verify --quiet "refs/tags/$TARGET_REF"; then
                 git checkout "tags/$TARGET_REF"
@@ -148,7 +148,7 @@ jobs:
               fi
               ./scripts/deploy.sh --dry-run
             else
-              echo "🚀 Pulling latest git ref and running fail-safe deployment pipeline..."
+              echo "Pulling latest git ref and running fail-safe deployment pipeline..."
               git fetch origin --tags
               if git show-ref --verify --quiet "refs/tags/$TARGET_REF"; then
                 echo "Checking out Git Tag: $TARGET_REF"
@@ -173,7 +173,7 @@ jobs:
   # JOB 3: Synthetic Public Endpoint Verification (E2E)
   # ============================================================================
   public-health-check:
-    name: 🌐 Synthetic Public Endpoint Verification
+    name: Synthetic Public Endpoint Verification
     needs: deploy
     if: always() && needs.deploy.result == 'success' && (inputs.action || github.event.inputs.action) != 'deploy-dry-run'
     runs-on: ubuntu-latest
