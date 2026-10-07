@@ -55,31 +55,31 @@ db.exec(`
 // Safe migrations if table previously existed without columns
 try {
   db.exec('ALTER TABLE shared_documents ADD COLUMN edit_token TEXT;');
-} catch (_) {}
+} catch {}
 
 try {
   db.exec('ALTER TABLE shared_documents ADD COLUMN updated_at INTEGER;');
-} catch (_) {}
+} catch {}
 
 try {
   db.exec('ALTER TABLE shared_documents ADD COLUMN password_hash TEXT;');
-} catch (_) {}
+} catch {}
 
 try {
   db.exec('ALTER TABLE shared_documents ADD COLUMN password_salt TEXT;');
-} catch (_) {}
+} catch {}
 
 try {
   db.exec('ALTER TABLE shared_documents ADD COLUMN burn_after_read INTEGER DEFAULT 0;');
-} catch (_) {}
+} catch {}
 
 try {
   db.exec('ALTER TABLE shared_documents ADD COLUMN is_burned INTEGER DEFAULT 0;');
-} catch (_) {}
+} catch {}
 
 try {
   db.exec('ALTER TABLE shared_documents ADD COLUMN burned_at INTEGER;');
-} catch (_) {}
+} catch {}
 
 // Prepared statements
 const stmtInsert = db.prepare(`
@@ -92,12 +92,6 @@ const stmtInsert = db.prepare(`
 
 const stmtGet = db.prepare(`
   SELECT * FROM shared_documents WHERE id = ?
-`);
-
-const stmtUpdate = db.prepare(`
-  UPDATE shared_documents
-  SET title = ?, content = ?, updated_at = ?
-  WHERE id = ?
 `);
 
 const stmtUpdateWithSecurity = db.prepare(`
@@ -661,7 +655,7 @@ Rules:
     let parsed;
     try {
       parsed = JSON.parse(cleaned);
-    } catch (parseErr) {
+    } catch {
       const tldrMatch = cleaned.match(/"tldr":\s*"([^"]+)"/);
       parsed = {
         tldr: tldrMatch ? tldrMatch[1] : cleaned.slice(0, 200),
@@ -713,7 +707,7 @@ app.get(['/install.sh', '/install'], (req, res) => {
 });
 
 // Serve static assets from Vite dist
-const distPath = path.join(__dirname, 'dist');
+const distPath = process.env.DIST_PATH || path.join(__dirname, 'dist');
 app.use(express.static(distPath, {
   maxAge: '1d',
   setHeaders: (res, filePath) => {
@@ -751,10 +745,15 @@ function createSnippet(markdown, maxLength = 160) {
 
 // SPA Fallback: Dynamic Meta Injection for /s/:id and Google Verification for /
 app.use((req, res) => {
-  const indexPath = path.join(distPath, 'index.html');
+  let indexPath = path.join(distPath, 'index.html');
 
   if (!fs.existsSync(indexPath)) {
-    return res.status(404).send('Application bundle not found.');
+    const rootIndexPath = path.join(__dirname, 'index.html');
+    if (fs.existsSync(rootIndexPath)) {
+      indexPath = rootIndexPath;
+    } else {
+      return res.status(404).send('Application bundle not found.');
+    }
   }
 
   let html = fs.readFileSync(indexPath, 'utf-8');

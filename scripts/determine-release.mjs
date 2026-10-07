@@ -46,9 +46,15 @@ export function detectCommitType(title = '', body = '') {
   // Breaking change checks:
   // 1. Title contains exclamation before colon: feat!: or feat(api)!:
   // 2. Title or Body contains BREAKING CHANGE: or BREAKING CHANGES:
+  // Note: Strip HTML comments, fenced code blocks, and inline backticks so template guidance doesn't trigger false positives.
+  const cleanedBody = safeBody
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`]+`/g, '');
+
   const hasBreakingBang = /^[a-z0-9_-]+(\([^)]+\))?!:/i.test(safeTitle);
   const hasBreakingText =
-    /BREAKING[ -]CHANGES?:/i.test(safeTitle) || /BREAKING[ -]CHANGES?:/i.test(safeBody);
+    /BREAKING[ -]CHANGES?:/i.test(safeTitle) || /BREAKING[ -]CHANGES?:/i.test(cleanedBody);
 
   const isBreaking = hasBreakingBang || hasBreakingText;
 

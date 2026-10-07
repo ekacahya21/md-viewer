@@ -60,6 +60,17 @@ test('detectCommitType - extracts breaking and conventional types', () => {
     isBreaking: false,
     type: 'ci'
   });
+
+  // Verify comments and markdown code references are ignored
+  const prTemplateText = `
+- [ ] **Major (\`X.0.0\`)**: \`feat!:\` or contains \`BREAKING CHANGE:\`
+- [x] No breaking changes introduced
+<!-- BREAKING CHANGE: <explanation> -->
+`;
+  assert.deepEqual(detectCommitType('feat: add document protection', prTemplateText), {
+    isBreaking: false,
+    type: 'feat'
+  });
 });
 
 test('calculateNextVersion - calculates semver versions', () => {
