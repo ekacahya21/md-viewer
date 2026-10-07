@@ -1,0 +1,13 @@
+# Robots.txt for MD Viewer (https://md-viewer.e21.dev)
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /s/
+
+# Dedicated Googlebot crawl rules
+User-agent: Googlebot
+Allow: /
+Disallow: /api/
+Disallow: /s/
+
+Sitemap: https://md-viewer.e21.dev/sitemap.xml
