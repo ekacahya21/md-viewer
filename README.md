@@ -7,6 +7,8 @@ A minimalist Markdown editor and reader with native math, Mermaid diagrams, and 
 [![Node.js 22+](https://img.shields.io/badge/node-%3E%3D22.5-339933?style=flat-square)](https://nodejs.org)
 [![React 19](https://img.shields.io/badge/react-19-61dafb?style=flat-square)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/typescript-5.9-3178c6?style=flat-square)](https://www.typescriptlang.org)
+[![M8ven Score](https://m8ven.ai/badge/mcp/ekacahya21-md-viewer-g62uof?v=db68f80078f8815451b5a82bed3db214)](https://m8ven.ai/mcp/ekacahya21-md-viewer-g62uof?s=readme)
+
 
 ![MD Viewer](public/og-image.png)
 
