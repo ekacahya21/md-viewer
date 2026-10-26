@@ -235,3 +235,39 @@ test('OpenGraph Meta Injection - hides content snippet for protected documents',
   assert.ok(!html.includes('Super sensitive content'));
   assert.ok(html.includes('Dokumen ini dilindungi kata sandi'));
 });
+
+test('Summarize API - rejects empty content with 400', async () => {
+  const res = await fetch(`${BASE_URL}/api/summarize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: '   ' }),
+  });
+
+  assert.equal(res.status, 400);
+  const json = await res.json();
+  assert.ok(json.error);
+  assert.equal(json.error, 'Konten dokumen kosong.');
+});
+
+test('Summarize API - successfully generates structured summary for markdown document', async () => {
+  const payload = {
+    title: 'Testing Document Insights',
+    content: `# Fitur Document Insights
+Document Insights adalah fitur cerdas pada MD Viewer yang mampu meringkas dokumen secara otomatis.
+Pengguna dapat membaca ringkasan eksekutif dan poin-poin utama dokumen tanpa perlu membaca keseluruhan teks.
+Fitur ini terintegrasi langsung dengan gateway 9router dan mendukung dokumen berbahasa Indonesia dan Inggris.`,
+  };
+
+  const res = await fetch(`${BASE_URL}/api/summarize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  assert.equal(res.status, 200);
+  const json = await res.json();
+  assert.equal(json.success, true);
+  assert.ok(typeof json.tldr === 'string' && json.tldr.length > 10, 'tldr must be non-empty string');
+  assert.ok(Array.isArray(json.takeaways) && json.takeaways.length > 0, 'takeaways must be a non-empty array');
+});
+

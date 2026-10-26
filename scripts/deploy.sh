@@ -31,10 +31,17 @@ CONTAINER_NAME="md-viewer"
 CANDIDATE_CONTAINER="md-viewer-candidate"
 BACKUP_CONTAINER="md-viewer-prev-backup"
 DEFAULT_NETWORK="md-viewer-net"
-if command -v docker &>/dev/null && docker network ls --format '{{.Name}}' 2>/dev/null | grep -Eq "^expense-dashboard_expense-net\$"; then
-  DEFAULT_NETWORK="expense-dashboard_expense-net"
+if [ -z "${CADDY_NETWORK:-}" ]; then
+  # Dynamically detect active Caddy container network if running on host
+  DETECTED_NET=""
+  if command -v docker &>/dev/null; then
+    CADDY_CONTAINER="$(docker ps --filter "name=caddy" --format "{{.Names}}" 2>/dev/null | head -n 1)"
+    if [ -n "${CADDY_CONTAINER}" ]; then
+      DETECTED_NET="$(docker inspect "${CADDY_CONTAINER}" --format '{{range $net, $v := .NetworkSettings.Networks}}{{$net}} {{end}}' 2>/dev/null | awk '{print $1}')"
+    fi
+  fi
+  CADDY_NETWORK="${DETECTED_NET:-${DEFAULT_NETWORK}}"
 fi
-CADDY_NETWORK="${CADDY_NETWORK:-${DEFAULT_NETWORK}}"
 HOST_PORT="${HOST_PORT:-3015}"
 CANDIDATE_PORT="${CANDIDATE_PORT:-3019}"
 PUBLIC_URL="${PUBLIC_URL:-https://md-viewer.e21.dev}"
@@ -47,6 +54,15 @@ ENV_FILE="${PROJECT_ROOT}/.env"
 SKIP_TESTS=false
 DRY_RUN=false
 DOCKER_NO_CACHE=""
+CUSTOM_IMAGE=""
+
+# Container Resource Limits & Logging Quota
+DOCKER_RESOURCE_LIMITS=(
+  --memory="512m"
+  --cpus="1.0"
+  --log-opt "max-size=20m"
+  --log-opt "max-file=3"
+)
 
 # Tracking variables for rollback
 ROLLBACK_NEEDED=false
@@ -77,6 +93,14 @@ log_error() {
 # Parse Command Line Arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --image)
+      CUSTOM_IMAGE="$2"
+      shift 2
+      ;;
+    --image=*)
+      CUSTOM_IMAGE="${1#*=}"
+      shift
+      ;;
     --skip-tests)
       SKIP_TESTS=true
       shift
@@ -94,9 +118,10 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: ./scripts/deploy.sh [OPTIONS]"
       echo ""
       echo "Options:"
+      echo "  --image <img>  Deploy pre-built container image (e.g. from GHCR)"
       echo "  --skip-tests   Skip pre-flight linting and unit test suite"
-      echo "  --dry-run      Build and probe candidate container without modifying production"
-      echo "  --no-cache     Build docker image without cache"
+      echo "  --dry-run      Build/pull and probe candidate container without modifying production"
+      echo "  --no-cache     Build docker image without cache (when building locally)"
       echo "  -h, --help     Show this help message"
       exit 0
       ;;
@@ -164,6 +189,7 @@ perform_rollback() {
     docker run -d \
       --name "${CONTAINER_NAME}" \
       --restart unless-stopped \
+      "${DOCKER_RESOURCE_LIMITS[@]}" \
       -p "${HOST_PORT}:80" \
       --env-file "${ENV_FILE}" \
       -v "${DATA_DIR}:/data" \
@@ -275,9 +301,14 @@ log_step "2/7" "Creating Safety Snapshot of SQLite Database"
 DB_FILE="${DATA_DIR}/shared_docs.db"
 if [ -f "${DB_FILE}" ]; then
   DB_BACKUP_PATH="${BACKUP_DIR}/shared_docs_snapshot_${TIMESTAMP}.db"
-  # Copy database file and associated WAL/SHM journaling files
-  cp -a "${DATA_DIR}"/shared_docs.db* "${BACKUP_DIR}/" 2>/dev/null || true
-  log_success "Database snapshot created at ${BACKUP_DIR}"
+  # Atomic SQLite backup using Python's SQLite online backup API
+  if python3 -c "import sqlite3, sys; src = sqlite3.connect('${DB_FILE}'); dst = sqlite3.connect('${DB_BACKUP_PATH}'); src.backup(dst); dst.close(); src.close()" 2>/dev/null; then
+    log_success "Database snapshot created via SQLite atomic backup at ${DB_BACKUP_PATH}"
+  else
+    log_warn "Python SQLite backup failed, falling back to standard copy..."
+    cp -a "${DATA_DIR}"/shared_docs.db* "${BACKUP_DIR}/" 2>/dev/null || true
+    log_success "Database snapshot created via fallback copy at ${BACKUP_DIR}"
+  fi
 
   # Prune backups older than 7 days, keeping at least the latest 10
   find "${BACKUP_DIR}" -name "shared_docs_snapshot_*.db" -mtime +7 -delete 2>/dev/null || true
@@ -302,18 +333,25 @@ else
 fi
 
 # ==============================================================================
-# PHASE 4: Build New Production Docker Image
+# PHASE 4: Acquire Production Docker Image
 # ==============================================================================
-log_step "4/7" "Building Production Docker Image (${RELEASE_TAG})"
-
-log_info "Executing Docker build with multi-stage assets..."
-# shellcheck disable=SC2086
-docker build ${DOCKER_NO_CACHE} \
-  -t "${APP_NAME}:${RELEASE_TAG}" \
-  -t "${APP_NAME}:candidate" \
-  .
-
-log_success "Docker image ${APP_NAME}:${RELEASE_TAG} built successfully"
+if [ -n "${CUSTOM_IMAGE}" ]; then
+  log_step "4/7" "Pulling Production Docker Image from Registry (${CUSTOM_IMAGE})"
+  log_info "Executing docker pull for pre-built image..."
+  docker pull "${CUSTOM_IMAGE}"
+  docker tag "${CUSTOM_IMAGE}" "${APP_NAME}:${RELEASE_TAG}"
+  docker tag "${CUSTOM_IMAGE}" "${APP_NAME}:candidate"
+  log_success "Docker image pulled and tagged as ${APP_NAME}:${RELEASE_TAG}"
+else
+  log_step "4/7" "Building Production Docker Image Locally (${RELEASE_TAG})"
+  log_info "Executing Docker build with multi-stage assets..."
+  # shellcheck disable=SC2086
+  docker build ${DOCKER_NO_CACHE} \
+    -t "${APP_NAME}:${RELEASE_TAG}" \
+    -t "${APP_NAME}:candidate" \
+    .
+  log_success "Docker image ${APP_NAME}:${RELEASE_TAG} built successfully"
+fi
 
 # ==============================================================================
 # PHASE 5: Candidate Staging Test (Fail-Safe Gate 1: Pre-Rollout Probing)
@@ -331,6 +369,8 @@ fi
 log_info "Starting isolated candidate container on test port ${CANDIDATE_PORT}..."
 docker run -d \
   --name "${CANDIDATE_CONTAINER}" \
+  "${DOCKER_RESOURCE_LIMITS[@]}" \
+  --add-host=host.docker.internal:host-gateway \
   -p "127.0.0.1:${CANDIDATE_PORT}:80" \
   --env-file "${ENV_FILE}" \
   -v "${CANDIDATE_DATA_DIR}:/data:rw" \
@@ -391,6 +431,8 @@ log_info "Launching new production container ${CONTAINER_NAME}..."
 docker run -d \
   --name "${CONTAINER_NAME}" \
   --restart unless-stopped \
+  "${DOCKER_RESOURCE_LIMITS[@]}" \
+  --add-host=host.docker.internal:host-gateway \
   -p "${HOST_PORT}:80" \
   --env-file "${ENV_FILE}" \
   -v "${DATA_DIR}:/data" \

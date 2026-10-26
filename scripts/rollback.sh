@@ -18,13 +18,28 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="md-viewer"
 CONTAINER_NAME="md-viewer"
 DEFAULT_NETWORK="md-viewer-net"
-if command -v docker &>/dev/null && docker network ls --format '{{.Name}}' 2>/dev/null | grep -Eq "^expense-dashboard_expense-net\$"; then
-  DEFAULT_NETWORK="expense-dashboard_expense-net"
+if [ -z "${CADDY_NETWORK:-}" ]; then
+  # Dynamically detect active Caddy container network if running on host
+  DETECTED_NET=""
+  if command -v docker &>/dev/null; then
+    CADDY_CONTAINER="$(docker ps --filter "name=caddy" --format "{{.Names}}" 2>/dev/null | head -n 1)"
+    if [ -n "${CADDY_CONTAINER}" ]; then
+      DETECTED_NET="$(docker inspect "${CADDY_CONTAINER}" --format '{{range $net, $v := .NetworkSettings.Networks}}{{$net}} {{end}}' 2>/dev/null | awk '{print $1}')"
+    fi
+  fi
+  CADDY_NETWORK="${DETECTED_NET:-${DEFAULT_NETWORK}}"
 fi
-CADDY_NETWORK="${CADDY_NETWORK:-${DEFAULT_NETWORK}}"
 HOST_PORT="${HOST_PORT:-3015}"
 DATA_DIR="${PROJECT_ROOT}/data"
 ENV_FILE="${PROJECT_ROOT}/.env"
+
+# Container Resource Limits & Logging Quota
+DOCKER_RESOURCE_LIMITS=(
+  --memory="512m"
+  --cpus="1.0"
+  --log-opt "max-size=20m"
+  --log-opt "max-file=3"
+)
 
 echo -e "${CLR_YELLOW}${CLR_BOLD}"
 echo "╔══════════════════════════════════════════════════════════════════════════╗"
@@ -66,6 +81,7 @@ echo "Launching rollback container from ${ROLLBACK_IMAGE}..."
 docker run -d \
   --name "${CONTAINER_NAME}" \
   --restart unless-stopped \
+  "${DOCKER_RESOURCE_LIMITS[@]}" \
   -p "${HOST_PORT}:80" \
   --env-file "${ENV_FILE}" \
   -v "${DATA_DIR}:/data" \

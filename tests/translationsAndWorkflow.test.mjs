@@ -35,6 +35,12 @@ test('i18n - English and Indonesian have complete translation keys for new featu
     assert.ok(translations.en.protectedDoc[key], `en protectedDoc.${key} should exist`);
     assert.ok(translations.id.protectedDoc[key], `id protectedDoc.${key} should exist`);
   }
+
+  // Check mermaidModal copyCode
+  assert.ok(translations.en.mermaidModal.copyCode, 'en mermaidModal.copyCode should exist');
+  assert.ok(translations.id.mermaidModal.copyCode, 'id mermaidModal.copyCode should exist');
+  assert.equal(translations.en.mermaidModal.copyCode, 'Copy Code');
+  assert.equal(translations.id.mermaidModal.copyCode, 'Salin Kode');
 });
 
 test('useDocumentSummary - content signature generation helper', async () => {

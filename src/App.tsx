@@ -898,7 +898,11 @@ export function App() {
 
   // Print / Save as PDF
   const handlePrintPdf = () => {
-    printToPdf();
+    printToPdf(title, previewContainerRef.current, {
+      words: stats.words,
+      readingTimeMinutes: stats.readingTimeMinutes,
+      language,
+    });
   };
 
   // Download Markdown file
@@ -1201,7 +1205,7 @@ export function App() {
           {/* Editor Pane (shown in Split or Editor mode) */}
           {(viewMode === 'split' || viewMode === 'editor') && (
             <div
-              className={`h-full min-w-0 ${
+              className={`editor-pane-container h-full min-w-0 ${
                 viewMode === 'editor'
                   ? 'w-full'
                   : 'w-full lg:flex-none lg:w-[var(--editor-split-width)]'
@@ -1261,13 +1265,16 @@ export function App() {
             </div>
           )}
 
-          {/* Preview Pane (shown in Reader or Split mode) */}
-          {(viewMode === 'reader' || viewMode === 'split') && (
-            <div
-              className={`h-full min-w-0 ${
-                viewMode === 'split' ? 'hidden lg:flex flex-1' : 'flex flex-1 w-full'
-              }`}
-            >
+          {/* Preview Pane (always mounted so print / PDF export always has formatted document) */}
+          <div
+            className={`preview-pane-container h-full min-w-0 ${
+              viewMode === 'reader'
+                ? 'flex flex-1 w-full'
+                : viewMode === 'split'
+                ? 'hidden lg:flex flex-1'
+                : 'hidden'
+            }`}
+          >
               {isLoadingShared ? (
                 /* Minimalist Editorial Skeleton (Prevents layout shift & flash of edit mode) */
                 <div
@@ -1321,8 +1328,7 @@ export function App() {
                   containerRef={previewContainerRef}
                 />
               )}
-            </div>
-          )}
+          </div>
 
           {/* Table of Contents Drawer */}
           <TableOfContents

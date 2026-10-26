@@ -574,50 +574,65 @@ app.get('/api/share/:id', handleRetrieveDocument);
 app.post('/api/share/:id/unlock', handleRetrieveDocument);
 
 // 9router AI Configuration & Helper
-const ROUTER_HOSTS = [
-  process.env.LOCAL_LLM_HOST,
-  'http://172.17.0.1:20128/v1',
-  'http://127.0.0.1:20128/v1',
-  'http://host.docker.internal:20128/v1',
-].filter(Boolean);
+const ROUTER_HOSTS = Array.from(
+  new Set(
+    [
+      process.env.LOCAL_LLM_HOST,
+      'http://172.17.0.1:20128/v1',
+      'http://127.0.0.1:20128/v1',
+      'http://host.docker.internal:20128/v1',
+    ].filter(Boolean)
+  )
+);
 
 const ROUTER_KEY = process.env.LOCAL_LLM_KEY || '';
-const ROUTER_MODEL = process.env.LOCAL_LLM_MODEL || 'ag/gemini-3.7-flash-low';
+const ROUTER_MODEL = process.env.LOCAL_LLM_MODEL || 'ag/gemini-3-flash';
+const FALLBACK_MODELS = ['ag/gemini-3-flash', 'ag-pinter', 'ag/claude-sonnet-4-6'];
+const CANDIDATE_MODELS = Array.from(new Set([ROUTER_MODEL, ...FALLBACK_MODELS].filter(Boolean)));
 
 async function callRouterCompletion(messages, maxTokens = 600) {
   if (!ROUTER_KEY) {
     throw new Error('LOCAL_LLM_KEY is not configured on the server. Please provide it via environment variable or .env');
   }
   let lastError = null;
+
   for (const host of ROUTER_HOSTS) {
-    try {
-      const endpoint = `${host.replace(/\/+$/, '')}/chat/completions`;
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${ROUTER_KEY}`,
-        },
-        body: JSON.stringify({
-          model: ROUTER_MODEL,
-          messages,
-          stream: false,
-          max_tokens: maxTokens,
-          temperature: 0.2,
-        }),
-        signal: AbortSignal.timeout(15000),
-      });
+    const endpoint = `${host.replace(/\/+$/, '')}/chat/completions`;
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        throw new Error(`9router HTTP ${res.status}: ${errText}`);
+    // Try candidate models in order on this host
+    for (const model of CANDIDATE_MODELS) {
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${ROUTER_KEY}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            stream: false,
+            max_tokens: maxTokens,
+            temperature: 0.2,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          lastError = new Error(`9router HTTP ${res.status} (${model}): ${errText}`);
+          console.warn(`[9router] Model ${model} returned HTTP ${res.status} on ${host}. Trying next fallback...`);
+          continue;
+        }
+
+        const data = await res.json();
+        const content = data.choices?.[0]?.message?.content ?? data.choices?.[0]?.text;
+        if (content) return content;
+      } catch (err) {
+        lastError = err;
+        // Network connection error on this host (e.g. host unreachable or DNS failure), try next host
+        break;
       }
-
-      const data = await res.json();
-      const content = data.choices?.[0]?.message?.content;
-      if (content) return content;
-    } catch (err) {
-      lastError = err;
     }
   }
   throw lastError || new Error('Failed to reach 9router AI endpoint');
@@ -658,15 +673,26 @@ Rules:
       { role: 'user', content: userPrompt },
     ], 600);
 
-    const cleaned = rawResponse.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    // Robust JSON extraction supporting potential code fence wrapping or surrounding commentary
+    let jsonText = rawResponse.trim();
+    const codeBlockMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (codeBlockMatch) {
+      jsonText = codeBlockMatch[1].trim();
+    } else {
+      const jsonObjectMatch = jsonText.match(/\{[\s\S]*\}/);
+      if (jsonObjectMatch) {
+        jsonText = jsonObjectMatch[0].trim();
+      }
+    }
+
     let parsed;
     try {
-      parsed = JSON.parse(cleaned);
+      parsed = JSON.parse(jsonText);
     } catch {
-      const tldrMatch = cleaned.match(/"tldr":\s*"([^"]+)"/);
+      const tldrMatch = jsonText.match(/"tldr":\s*"([^"]+)"/);
       parsed = {
-        tldr: tldrMatch ? tldrMatch[1] : cleaned.slice(0, 200),
-        takeaways: [cleaned.slice(0, 300)],
+        tldr: tldrMatch ? tldrMatch[1] : jsonText.slice(0, 200),
+        takeaways: [jsonText.slice(0, 300)],
       };
     }
 

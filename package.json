@@ -1,7 +1,7 @@
 {
   "name": "md-viewer",
   "version": "1.1.0",
-  "description": "Minimalist editorial Markdown studio & reader with native Mermaid diagrams, KaTeX math formulas, zero-signup document sharing, and distraction-free typography.",
+  "description": "Minimalist editorial Markdown studio & reader with native Mermaid diagrams, KaTeX math formulas, password-protected sharing, and Model Context Protocol (MCP) support.",
   "author": "Eka Cahya",
   "license": "MIT",
   "homepage": "https://md-viewer.e21.dev",
@@ -11,13 +11,18 @@
   },
   "keywords": [
     "markdown",
+    "markdown-editor",
     "editor",
     "reader",
     "mermaid",
     "katex",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
     "editorial",
     "minimalist",
-    "note-taking"
+    "note-taking",
+    "document-sharing"
   ],
   "type": "module",
   "engines": {

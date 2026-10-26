@@ -188,6 +188,7 @@ export interface Translations {
     zoomIn: string;
     zoomOut: string;
     reset: string;
+    copyCode: string;
     copySvg: string;
     downloadSvg: string;
     close: string;
@@ -399,6 +400,7 @@ export const translations: Record<Language, Translations> = {
       zoomIn: 'Zoom In',
       zoomOut: 'Zoom Out',
       reset: 'Reset',
+      copyCode: 'Copy Code',
       copySvg: 'Copy SVG',
       downloadSvg: 'Download',
       close: 'Close',
@@ -608,6 +610,7 @@ export const translations: Record<Language, Translations> = {
       zoomIn: 'Perbesar',
       zoomOut: 'Perkecil',
       reset: 'Reset',
+      copyCode: 'Salin Kode',
       copySvg: 'Salin SVG',
       downloadSvg: 'Unduh',
       close: 'Tutup',

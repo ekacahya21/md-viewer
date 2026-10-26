@@ -34,3 +34,4 @@ data/
 
 # Local test screenshots
 collected_screenshots/
+.forgeguard/

@@ -1,14 +1,16 @@
 # MD Viewer
 
-A minimalist Markdown editor and reader with native math, Mermaid diagrams, and instant zero-account link sharing.
+A minimalist Markdown editor and reader with native math, Mermaid diagrams, instant zero-account link sharing, and password protection.
 
 [![Live Demo](https://img.shields.io/badge/demo-md--viewer.e21.dev-2563eb?style=flat-square)](https://md-viewer.e21.dev)
+[![CI Pipeline](https://github.com/ekacahya21/md-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/ekacahya21/md-viewer/actions/workflows/ci.yml)
+[![Production Deploy](https://github.com/ekacahya21/md-viewer/actions/workflows/deploy.yml/badge.svg)](https://github.com/ekacahya21/md-viewer/actions/workflows/deploy.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![Node.js 22+](https://img.shields.io/badge/node-%3E%3D22.5-339933?style=flat-square)](https://nodejs.org)
 [![React 19](https://img.shields.io/badge/react-19-61dafb?style=flat-square)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/typescript-5.9-3178c6?style=flat-square)](https://www.typescriptlang.org)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ed?style=flat-square)](Dockerfile)
 [![M8ven Score](https://m8ven.ai/badge/mcp/ekacahya21-md-viewer-g62uof?v=db68f80078f8815451b5a82bed3db214)](https://m8ven.ai/mcp/ekacahya21-md-viewer-g62uof?s=readme)
-
 
 ![MD Viewer](public/og-image.png)
 
@@ -19,7 +21,10 @@ A minimalist Markdown editor and reader with native math, Mermaid diagrams, and 
 - **Reader & Split Views**: Seamlessly switch between reading mode, distraction-free editing, and synchronized split view.
 - **Math & Diagrams**: Native rendering for KaTeX LaTeX formulas (`$...$` and `$$...$$`) and Mermaid diagrams (flowcharts, sequence, state, ER, class, Gantt).
 - **Zero-Account Sharing**: Generate a short link (`/s/:id`) with an optional QR code in one click. No registration required.
+- **Password Protection & Burn-After-Reading**: Secure shared documents with bcrypt password protection or self-destructing links that permanently burn on first view.
 - **Re-publish Shared Docs**: Authors receive an edit token saved locally in the browser/CLI, allowing you to update a shared document without changing its URL.
+- **AI Document Summaries**: Instant asynchronous document executive summaries powered by local LLM endpoints (Ollama/9router/OpenAI-compatible).
+- **Bilingual Interface**: Seamless language switching between English and Indonesian (`en` / `id`).
 - **Multi-Format Export**: Export clean print-formatted PDFs, standalone offline HTML files, or raw Markdown.
 - **Themes**: Paper (light), Charcoal (dark), and Sepia.
 - **Command Palette**: Press `Cmd+K` / `Ctrl+K` for fast navigation, theme switching, and actions.
@@ -160,21 +165,21 @@ cp .env.example .env
 | `GOOGLE_SITE_VERIFICATION` | `""` | Optional Google Search Console verification meta tag |
 | `LOCAL_LLM_HOST` | `http://127.0.0.1:20128/v1` | Optional OpenAI-compatible endpoint for AI summary |
 | `LOCAL_LLM_KEY` | `""` | Optional API key for LLM endpoint |
-| `LOCAL_LLM_MODEL` | `ag/gemini-3.7-flash-low` | LLM model name for document summarization |
+| `LOCAL_LLM_MODEL` | `ag/gemini-3-flash` | LLM model name for document summarization |
 
 ---
 
-## Testing
+## Testing & Quality Assurance
 
 ```bash
-# Run unit and integration tests (Node 22 test runner)
+# Run unit and integration tests (Node 22 native test runner)
 npm test
 
-# Run linter
+# Run code linter (oxlint)
 npm run lint
 
-# Run type check
-npx tsc --noEmit
+# Compile production assets
+npm run build
 ```
 
 ---
@@ -187,4 +192,5 @@ Contributions are welcome. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for det
 
 ## License
 
-This project is open source and available under the [MIT License](LICENSE).
+This project is open-source software licensed under the [MIT License](LICENSE).  
+Copyright (c) 2026 [Eka Cahya](https://github.com/ekacahya21).

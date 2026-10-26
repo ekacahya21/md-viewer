@@ -24,7 +24,7 @@ export const Preview: React.FC<PreviewProps> = ({
   const internalRef = useRef<HTMLDivElement>(null);
   const containerRef = externalRef || internalRef;
   const [inspectingSvg, setInspectingSvg] = useState<string | null>(null);
-
+  const [inspectingCode, setInspectingCode] = useState<string | null>(null);
   // Initialize and render Mermaid diagrams whenever HTML or theme changes
   useEffect(() => {
     const container = containerRef.current;
@@ -90,41 +90,6 @@ export const Preview: React.FC<PreviewProps> = ({
           }
         }
 
-        // Bind interactive toolbar buttons
-        const btnZoom = card.querySelector<HTMLButtonElement>('.btn-mermaid-zoom');
-        const btnCopy = card.querySelector<HTMLButtonElement>('.btn-mermaid-copy-svg');
-        const btnDownload = card.querySelector<HTMLButtonElement>('.btn-mermaid-download');
-
-        if (btnZoom) {
-          btnZoom.onclick = () => {
-            setInspectingSvg(svg);
-          };
-        }
-
-        if (btnCopy) {
-          btnCopy.onclick = async () => {
-            await copyText(svg);
-            const originalText = btnCopy.innerHTML;
-            btnCopy.innerHTML = `<span class="text-emerald-500 font-semibold">Copied!</span>`;
-            setTimeout(() => {
-              btnCopy.innerHTML = originalText;
-            }, 2000);
-          };
-        }
-
-        if (btnDownload) {
-          btnDownload.onclick = () => {
-            const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `diagram-${idx + 1}.svg`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-          };
-        }
       } catch (err: unknown) {
         if (isCancelled) return;
         console.error('Mermaid render error:', err);
@@ -138,28 +103,6 @@ export const Preview: React.FC<PreviewProps> = ({
           </div>
         `;
       }
-    });
-
-    // Bind Code Block Copy Buttons
-    const codeCards = container.querySelectorAll<HTMLElement>('.code-block-card');
-    codeCards.forEach((card) => {
-      const copyBtn = card.querySelector<HTMLButtonElement>('.btn-code-copy');
-      const encodedCode = card.getAttribute('data-code');
-      if (!copyBtn || !encodedCode) return;
-
-      copyBtn.onclick = async () => {
-        const rawCode = decodeURIComponent(encodedCode);
-        await copyText(rawCode);
-        const label = copyBtn.querySelector('.copy-label');
-        if (label) {
-          label.textContent = 'Copied!';
-          copyBtn.classList.add('text-emerald-500');
-          setTimeout(() => {
-            label.textContent = 'Copy';
-            copyBtn.classList.remove('text-emerald-500');
-          }, 2000);
-        }
-      };
     });
 
     return () => {
@@ -176,15 +119,117 @@ export const Preview: React.FC<PreviewProps> = ({
       );
     }
   };
-
   const isReader = viewMode === 'reader';
+
+  const handleContainerClick = async (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+
+    // 1. Copy Diagram Source Code (.btn-mermaid-copy-code)
+    const btnCopyCode = target.closest<HTMLButtonElement>('.btn-mermaid-copy-code');
+    if (btnCopyCode) {
+      const card = btnCopyCode.closest<HTMLElement>('.mermaid-diagram-card');
+      const encoded = card?.getAttribute('data-mermaid');
+      if (encoded) {
+        const rawCode = decodeURIComponent(encoded);
+        await copyText(rawCode);
+        const label = btnCopyCode.querySelector('.copy-code-label');
+        const originalText = label ? label.textContent : btnCopyCode.innerHTML;
+        if (label) {
+          label.textContent = 'Copied!';
+        } else {
+          btnCopyCode.innerHTML = `<span class="text-emerald-500 font-semibold">Copied!</span>`;
+        }
+        btnCopyCode.classList.add('text-emerald-500');
+        setTimeout(() => {
+          if (label) {
+            label.textContent = originalText;
+          } else {
+            btnCopyCode.innerHTML = originalText;
+          }
+          btnCopyCode.classList.remove('text-emerald-500');
+        }, 2000);
+      }
+      return;
+    }
+
+    // 2. Inspect Diagram Modal (.btn-mermaid-zoom)
+    const btnZoom = target.closest<HTMLButtonElement>('.btn-mermaid-zoom');
+    if (btnZoom) {
+      const card = btnZoom.closest<HTMLElement>('.mermaid-diagram-card');
+      const svgEl = card?.querySelector<SVGElement>('.mermaid-target svg');
+      const encoded = card?.getAttribute('data-mermaid');
+      const rawCode = encoded ? decodeURIComponent(encoded) : '';
+      if (svgEl) {
+        setInspectingSvg(svgEl.outerHTML);
+        setInspectingCode(rawCode);
+      }
+      return;
+    }
+
+    // 3. Copy SVG (.btn-mermaid-copy-svg)
+    const btnCopySvg = target.closest<HTMLButtonElement>('.btn-mermaid-copy-svg');
+    if (btnCopySvg) {
+      const card = btnCopySvg.closest<HTMLElement>('.mermaid-diagram-card');
+      const svgEl = card?.querySelector<SVGElement>('.mermaid-target svg');
+      if (svgEl) {
+        await copyText(svgEl.outerHTML);
+        const originalText = btnCopySvg.innerHTML;
+        btnCopySvg.innerHTML = `<span class="text-emerald-500 font-semibold">Copied!</span>`;
+        setTimeout(() => {
+          btnCopySvg.innerHTML = originalText;
+        }, 2000);
+      }
+      return;
+    }
+
+    // 4. Download SVG (.btn-mermaid-download)
+    const btnDownload = target.closest<HTMLButtonElement>('.btn-mermaid-download');
+    if (btnDownload) {
+      const card = btnDownload.closest<HTMLElement>('.mermaid-diagram-card');
+      const svgEl = card?.querySelector<SVGElement>('.mermaid-target svg');
+      if (svgEl) {
+        const blob = new Blob([svgEl.outerHTML], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `mermaid-diagram-${Date.now()}.svg`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+      return;
+    }
+
+    // 5. Code Block Copy (.btn-code-copy)
+    const btnCodeCopy = target.closest<HTMLButtonElement>('.btn-code-copy');
+    if (btnCodeCopy) {
+      const card = btnCodeCopy.closest<HTMLElement>('.code-block-card');
+      const encoded = card?.getAttribute('data-code');
+      if (encoded) {
+        const rawCode = decodeURIComponent(encoded);
+        await copyText(rawCode);
+        const label = btnCodeCopy.querySelector('.copy-label');
+        if (label) {
+          label.textContent = 'Copied!';
+          btnCodeCopy.classList.add('text-emerald-500');
+          setTimeout(() => {
+            label.textContent = 'Copy';
+            btnCodeCopy.classList.remove('text-emerald-500');
+          }, 2000);
+        }
+      }
+      return;
+    }
+  };
 
   return (
     <>
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 min-w-0 w-full h-full overflow-y-auto overflow-x-hidden bg-[var(--bg-canvas)] transition-colors selection:bg-[var(--accent-amber)]/20"
+        onClick={handleContainerClick}
+        className="preview-pane-scroller flex-1 min-w-0 w-full h-full overflow-y-auto overflow-x-hidden bg-[var(--bg-canvas)] transition-colors selection:bg-[var(--accent-amber)]/20"
       >
         <div
           className={`transition-all duration-200 min-w-0 max-w-full ${
@@ -204,7 +249,11 @@ export const Preview: React.FC<PreviewProps> = ({
       {inspectingSvg && (
         <MermaidModal
           svgContent={inspectingSvg}
-          onClose={() => setInspectingSvg(null)}
+          rawCode={inspectingCode || undefined}
+          onClose={() => {
+            setInspectingSvg(null);
+            setInspectingCode(null);
+          }}
           language={language}
         />
       )}

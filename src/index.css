@@ -299,32 +299,151 @@ body {
 
 /* Print Stylesheet */
 @media print {
-  header,
-  aside,
-  .mermaid-diagram-toolbar,
-  .code-block-header button,
-  .heading-anchor,
-  .no-print {
-    display: none !important;
+  @page {
+    margin: 1.5cm;
+    size: auto;
   }
-  
+
+  /* Force high-contrast black-on-white palette regardless of active theme */
+  :root,
+  :root[data-theme="paper"],
+  :root[data-theme="charcoal"],
+  :root[data-theme="sepia"],
   body {
+    --bg-canvas: #ffffff !important;
+    --bg-surface: #ffffff !important;
+    --bg-subtle: #f8f9fa !important;
+    --border-subtle: #e5e7eb !important;
+    --border-strong: #d1d5db !important;
+    --text-primary: #111827 !important;
+    --text-secondary: #4b5563 !important;
+    --text-muted: #6b7280 !important;
+    --code-bg: #f3f4f6 !important;
+    color-scheme: light !important;
     background: #ffffff !important;
-    color: #000000 !important;
+    color: #111827 !important;
     font-size: 11pt !important;
   }
 
-  .prose-container {
+  /* Hide navigation, toolbars, drawers, footers, editors, and interactive overlays */
+  header,
+  footer,
+  aside,
+  [role="separator"],
+  [role="dialog"],
+  [aria-modal="true"],
+  .mermaid-diagram-toolbar,
+  .code-block-header button,
+  .heading-anchor,
+  .no-print,
+  .editor-pane-container,
+  .fixed,
+  #root > div > :not(main),
+  main > :not(.preview-pane-container) {
+    display: none !important;
+  }
+  /* Unconstrain ancestor containers so browser can paginate without clipping */
+  html,
+  body {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
     max-width: 100% !important;
+    width: 100% !important;
+    background: #ffffff !important;
+  }
+
+  #root,
+  #root > div,
+  main {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
     padding: 0 !important;
   }
 
+  /* Preview pane containers must expand fully and be visible in all view modes */
+  .preview-pane-container {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+
+  .preview-pane-scroller {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+    background: #ffffff !important;
+  }
+
+  .preview-pane-scroller > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .prose-container {
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    color: #111827 !important;
+  }
+
+  .prose-container h1,
+  .prose-container h2,
+  .prose-container h3,
+  .prose-container h4,
+  .prose-container h5,
+  .prose-container h6,
+  .prose-container p,
+  .prose-container li,
+  .prose-container td,
+  .prose-container th {
+    color: #111827 !important;
+  }
+
+  .prose-container a {
+    color: #1d4ed8 !important;
+    text-decoration: underline;
+  }
+
+  .prose-container pre code,
+  .prose-container code {
+    background: #f3f4f6 !important;
+    color: #1f2937 !important;
+  }
+
+  /* Clean page-break rules for cards and diagrams */
   .mermaid-diagram-card,
   .code-block-card,
   .callout,
   blockquote,
   table {
     page-break-inside: avoid !important;
-    border-color: #cccccc !important;
+    break-inside: avoid !important;
+    border-color: #e5e7eb !important;
+    background-color: #ffffff !important;
+  }
+
+  /* Ensure Mermaid text inside SVGs remains crisp and legible */
+  .mermaid-diagram-card svg text {
+    fill: #111827 !important;
   }
 }

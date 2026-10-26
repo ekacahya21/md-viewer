@@ -1,17 +1,19 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { X, ZoomIn, ZoomOut, RotateCcw, Copy, Download, Check, Network } from 'lucide-react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { X, ZoomIn, ZoomOut, RotateCcw, Copy, Download, Check, Network, Code } from 'lucide-react';
 import { copyText } from '../utils/exportUtils';
 import { translations } from '../i18n/translations';
 import type { Language } from '../types';
 
 interface MermaidModalProps {
   svgContent: string;
+  rawCode?: string;
   onClose: () => void;
   language?: Language;
 }
 
 export const MermaidModal: React.FC<MermaidModalProps> = ({
   svgContent,
+  rawCode,
   onClose,
   language = 'en',
 }) => {
@@ -20,9 +22,14 @@ export const MermaidModal: React.FC<MermaidModalProps> = ({
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [copied, setCopied] = useState(false);
+  const [copiedSvg, setCopiedSvg] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [isReady, setIsReady] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const initialFitScaleRef = useRef(1);
+  const hasUserInteractedRef = useRef(false);
   const dragDistanceRef = useRef(0);
   const touchStartRef = useRef<{
     x: number;
@@ -30,7 +37,6 @@ export const MermaidModal: React.FC<MermaidModalProps> = ({
     initialDistance?: number;
     initialScale?: number;
   }>({ x: 0, y: 0 });
-
   // Close on Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -44,6 +50,7 @@ export const MermaidModal: React.FC<MermaidModalProps> = ({
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return; // only left click
     setIsDragging(true);
+    hasUserInteractedRef.current = true;
     dragDistanceRef.current = 0;
     setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
   };
@@ -64,6 +71,7 @@ export const MermaidModal: React.FC<MermaidModalProps> = ({
   // Pan & Pinch-to-zoom - Touch
   const handleTouchStart = (e: React.TouchEvent) => {
     dragDistanceRef.current = 0;
+    hasUserInteractedRef.current = true;
     if (e.touches.length === 1) {
       const touch = e.touches[0];
       touchStartRef.current = {
@@ -98,7 +106,7 @@ export const MermaidModal: React.FC<MermaidModalProps> = ({
       const t2 = e.touches[1];
       const currentDistance = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
       const ratio = currentDistance / touchStartRef.current.initialDistance;
-      const newScale = Math.min(Math.max((touchStartRef.current.initialScale || 1) * ratio, 0.2), 6);
+      const newScale = Math.min(Math.max((touchStartRef.current.initialScale || 1) * ratio, 0.05), 6);
       dragDistanceRef.current += 10;
       setScale(newScale);
     }
@@ -127,21 +135,134 @@ export const MermaidModal: React.FC<MermaidModalProps> = ({
   // Zoom on wheel
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
+    hasUserInteractedRef.current = true;
     const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
-    setScale((prev) => Math.min(Math.max(prev * zoomFactor, 0.2), 6));
+    setScale((prev) => Math.min(Math.max(prev * zoomFactor, 0.05), 6));
   };
 
-  const handleZoomIn = () => setScale((prev) => Math.min(prev * 1.25, 6));
-  const handleZoomOut = () => setScale((prev) => Math.max(prev * 0.8, 0.2));
+  const handleZoomIn = () => {
+    hasUserInteractedRef.current = true;
+    setScale((prev) => Math.min(prev * 1.25, 6));
+  };
+  const handleZoomOut = () => {
+    hasUserInteractedRef.current = true;
+    setScale((prev) => Math.max(prev * 0.8, 0.05));
+  };
   const handleReset = () => {
-    setScale(1);
+    hasUserInteractedRef.current = false;
+    setScale(initialFitScaleRef.current);
     setPosition({ x: 0, y: 0 });
   };
 
+  // Calculate natural dimensions and fit diagram directly to screen
+  const fitDiagram = (force = false) => {
+    if (!containerRef.current || !cardRef.current) return;
+    const svg = cardRef.current.querySelector('svg');
+    if (!svg) return;
+
+    // Extract natural dimensions from viewBox, getBBox, attributes, or style
+    let naturalWidth = 0;
+    let naturalHeight = 0;
+    const vb = svg.viewBox?.baseVal;
+    if (vb && vb.width > 0 && vb.height > 0) {
+      naturalWidth = vb.width;
+      naturalHeight = vb.height;
+    }
+    if (!naturalWidth || !naturalHeight) {
+      const vbAttr = svg.getAttribute('viewBox');
+      if (vbAttr) {
+        const parts = vbAttr.trim().split(/[\s,]+/);
+        if (parts.length === 4) {
+          naturalWidth = parseFloat(parts[2]) || 0;
+          naturalHeight = parseFloat(parts[3]) || 0;
+        }
+      }
+    }
+    if (!naturalWidth || !naturalHeight) {
+      try {
+        const bbox = svg.getBBox();
+        if (bbox.width > 0 && bbox.height > 0) {
+          naturalWidth = bbox.width;
+          naturalHeight = bbox.height;
+        }
+      } catch {
+        // getBBox might throw if detached or unsupported
+      }
+    }
+    if (!naturalWidth || !naturalHeight) {
+      naturalWidth = parseFloat(svg.getAttribute('width') || '');
+      naturalHeight = parseFloat(svg.getAttribute('height') || '');
+    }
+    if (!naturalWidth || !naturalHeight) {
+      const styleMaxW = parseFloat(svg.style.maxWidth || '');
+      if (styleMaxW > 0) {
+        naturalWidth = styleMaxW;
+        naturalHeight = styleMaxW * 0.75;
+      }
+    }
+    if (!naturalWidth || !naturalHeight) {
+      naturalWidth = svg.clientWidth || 300;
+      naturalHeight = svg.clientHeight || 150;
+    }
+
+    // Set explicit pixel dimensions on SVG to prevent default 300px fallback
+    svg.style.width = `${naturalWidth}px`;
+    svg.style.height = `${naturalHeight}px`;
+    svg.style.maxWidth = 'none';
+    svg.style.display = 'block';
+
+    const containerW = containerRef.current.clientWidth;
+    const containerH = containerRef.current.clientHeight;
+    if (!containerW || !containerH) {
+      setIsReady(true);
+      return;
+    }
+
+    const paddingX = window.innerWidth < 640 ? 32 : 64;
+    const paddingY = window.innerWidth < 640 ? 80 : 120;
+
+    const availW = Math.max(containerW - paddingX, 100);
+    const availH = Math.max(containerH - paddingY, 100);
+
+    const cardW = cardRef.current.offsetWidth || (naturalWidth + paddingX) || 300;
+    const cardH = cardRef.current.offsetHeight || (naturalHeight + paddingY) || 150;
+
+    const scaleX = availW / cardW;
+    const scaleY = availH / cardH;
+    const fitScale = Math.min(scaleX, scaleY, 1);
+    const clampedScale = Math.min(Math.max(fitScale, 0.05), 6);
+
+    initialFitScaleRef.current = clampedScale;
+    if (force || !hasUserInteractedRef.current) {
+      setScale(clampedScale);
+      setPosition({ x: 0, y: 0 });
+    }
+    setIsReady(true);
+  };
+
+  // Immediately fit diagram on mount and handle window resize
+  useLayoutEffect(() => {
+    fitDiagram(true);
+
+    const handleResize = () => {
+      fitDiagram(false);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [svgContent]);
+
   const handleCopySvg = async () => {
     await copyText(svgContent);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedSvg(true);
+    setTimeout(() => setCopiedSvg(false), 2000);
+  };
+
+  const handleCopyCode = async () => {
+    if (!rawCode) return;
+    await copyText(rawCode);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
   };
 
   const handleDownloadSvg = () => {
@@ -212,19 +333,37 @@ export const MermaidModal: React.FC<MermaidModalProps> = ({
 
         {/* Right Action Buttons & Close */}
         <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+          {/* Copy Diagram Source Code */}
+          {rawCode && (
+            <button
+              onClick={handleCopyCode}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)] active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+              title={t.mermaidModal.copyCode}
+            >
+              {copiedCode ? (
+                <Check className="w-3.5 h-3.5 text-emerald-500" />
+              ) : (
+                <Code className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+              )}
+              <span className="hidden sm:inline">
+                {copiedCode ? t.common.copied : t.mermaidModal.copyCode}
+              </span>
+            </button>
+          )}
+
           {/* Copy SVG */}
           <button
             onClick={handleCopySvg}
-            className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)] active:scale-95 transition-all flex items-center gap-1.5"
+            className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)] active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
             title={t.mermaidModal.copySvg}
           >
-            {copied ? (
+            {copiedSvg ? (
               <Check className="w-3.5 h-3.5 text-emerald-500" />
             ) : (
               <Copy className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
             )}
             <span className="hidden sm:inline">
-              {copied ? t.common.copied : t.mermaidModal.copySvg}
+              {copiedSvg ? t.common.copied : t.mermaidModal.copySvg}
             </span>
           </button>
 
@@ -266,11 +405,13 @@ export const MermaidModal: React.FC<MermaidModalProps> = ({
         }`}
       >
         <div
+          ref={cardRef}
           onClick={(e) => e.stopPropagation()}
           style={{
             transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
             transformOrigin: 'center center',
-            transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+            transition: isDragging || !isReady ? 'none' : 'transform 0.1s ease-out',
+            opacity: isReady ? 1 : 0,
           }}
           className="select-none pointer-events-auto p-4 sm:p-8 rounded-2xl bg-white shadow-2xl max-w-none transition-shadow"
           dangerouslySetInnerHTML={{ __html: svgContent }}
